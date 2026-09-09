@@ -103,3 +103,11 @@ TXD,P14.0 (UART0 RX),
 GND,GND,
 VCC(5V),5V,
 EN,悬空不连接,
+
+
+按键
+设备,单片机引脚,备注
+按键1,P22_0,GPIO
+按键2,P22_1,GPIO
+按键3,P22_2,GPIO
+按键4,P22_3,GPIO
