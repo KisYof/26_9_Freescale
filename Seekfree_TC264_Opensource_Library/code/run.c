@@ -77,7 +77,7 @@ void run_init(void)
 }
 
 // 占空比duty:0-10000
-void run_motor_left_speed(int8 duty)
+void run_motor_left_speed(int16 duty)
 {
     if (duty >= 0) // 正转
     {
@@ -92,7 +92,7 @@ void run_motor_left_speed(int8 duty)
 }
 
 // 占空比duty:0-10000
-void run_motor_right_speed(int8 duty)
+void run_motor_right_speed(int16 duty)
 {
     if (duty >= 0) // 正转
     {
