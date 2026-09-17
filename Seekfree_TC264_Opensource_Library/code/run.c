@@ -81,12 +81,12 @@ void run_motor_left_speed(int16 duty)
 {
     if (duty >= 0) // 正转
     {
-        gpio_set_level(DIR_L2, GPIO_HIGH);                   // DIR输出高电平
+        gpio_set_level(DIR_L2, GPIO_LOW);                   // DIR输出低电平
         pwm_set_duty(PWM_L2, duty * (PWM_DUTY_MAX / 10000)); // 计算占空比
     }
     else // 反转
     {
-        gpio_set_level(DIR_L2, GPIO_LOW);                       // DIR输出低电平
+        gpio_set_level(DIR_L2, GPIO_HIGH);                       // DIR输出高电平
         pwm_set_duty(PWM_L2, (-duty) * (PWM_DUTY_MAX / 10000)); // 计算占空比
     }
 }
@@ -96,12 +96,12 @@ void run_motor_right_speed(int16 duty)
 {
     if (duty >= 0) // 正转
     {
-        gpio_set_level(DIR_R2, GPIO_LOW);                    // DIR输出低电平
+        gpio_set_level(DIR_R2, GPIO_HIGH);                    // DIR输出高电平
         pwm_set_duty(PWM_R2, duty * (PWM_DUTY_MAX / 10000)); // 计算占空比
     }
     else // 反转
     {
-        gpio_set_level(DIR_R2, GPIO_HIGH);                      // DIR输出高电平
+        gpio_set_level(DIR_R2, GPIO_LOW);                      // DIR输出低电平
         pwm_set_duty(PWM_R2, (-duty) * (PWM_DUTY_MAX / 10000)); // 计算占空比
     }
 }
