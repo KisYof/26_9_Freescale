@@ -57,7 +57,7 @@
 // 全局变量
 int16 encoder_left = 0;
 int16 encoder_right = 0;
-int8 speed = 10;
+int16 speed = 10;
 
 PID_Controller_t pid_left;
 PID_Controller_t pid_right;
@@ -129,7 +129,7 @@ void run_servo_motor_angle(int8 angle)
 
 // speed：速度值，正值前进，负值后退
 // gap: 左右电机速度差值，正值右转，负值左转
-void run_direct(int8 speed, int8 gap)
+void run_direct(int16 speed, int16 gap)
 {
     encoder_left = -CALC_LINE_SPEED_CM_S(encoder_get_count(ENCODER_1)); // 获取编码器计数
     encoder_clear_count(ENCODER_1);                                    // 清空编码器计数
