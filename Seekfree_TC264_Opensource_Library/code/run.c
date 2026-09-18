@@ -59,6 +59,9 @@ int16 encoder_left = 0;
 int16 encoder_right = 0;
 int8 speed = 10;
 
+PID_Controller_t pid_left;
+PID_Controller_t pid_right;
+
 void run_init(void)
 {
     // 电机驱动初始化
@@ -74,6 +77,10 @@ void run_init(void)
 
     // 舵机初始化
     pwm_init(SERVO_MOTOR_PWM, SERVO_MOTOR_FREQ, 0);
+
+    // 电机PID初始化
+    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 30, 1.0, 0.0, 1500, -1500, 0, 0);
+    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 30, 1.0, 0.0, 1500, -1500, 0, 0);
 }
 
 // 占空比duty:0-10000
@@ -129,6 +136,12 @@ void run_direct(int8 speed, int8 gap)
 
     encoder_right = CALC_LINE_SPEED_CM_S(encoder_get_count(ENCODER_2)); // 获取编码器计数
     encoder_clear_count(ENCODER_2);                                     // 清空编码器计数
+
+    int16 left_speed = (int16)PID_Controller_Calc(&pid_left, speed, encoder_left);
+    int16 right_speed = (int16)PID_Controller_Calc(&pid_right, speed, encoder_right);
+
+    run_motor_left_speed(left_speed);
+    run_motor_right_speed(right_speed);
 }
 
 IFX_INTERRUPT(cc60_pit_ch0_isr, 0, CCU6_0_CH0_ISR_PRIORITY)
