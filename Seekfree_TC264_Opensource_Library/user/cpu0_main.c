@@ -58,7 +58,8 @@ int core0_main(void)
     {
         // 此处编写需要循环执行的代码
 
-        system_delay_ms(5);
+        run_while();
+
         // 此处编写需要循环执行的代码
     }
 }

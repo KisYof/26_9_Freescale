@@ -61,6 +61,7 @@ int16 raw_right = 0;
 int16 encoder_left = 0;
 int16 encoder_right = 0;
 int16 speed = 10;
+uint8 uart_flag = 0;
 
 PID_Controller_t pid_left;
 PID_Controller_t pid_right;
@@ -72,6 +73,8 @@ static filter_rc_state_t encoder_right_filter;
 
 void run_init(void)
 {
+    pit_ms_init(CCU60_CH1, 10); // 10ms产生一次中断
+
     // 电机驱动初始化
     gpio_init(DIR_R2, GPO, GPIO_HIGH, GPO_PUSH_PULL); // GPIO 初始化为输出 默认上拉输出高
     pwm_init(PWM_R2, 17000, 0);                       // PWM 通道初始化频率 17KHz 占空比初始为 0
@@ -96,6 +99,15 @@ void run_init(void)
     // 编码器低通滤波滤波初始化
     filter_rc_state_reset(&encoder_left_filter);
     filter_rc_state_reset(&encoder_right_filter);
+}
+
+void run_while(void)
+{
+    if (uart_flag == 1)
+    {
+        uart_flag = 0;
+        printf("Speed: %d,%d,%d,%d\r\n", raw_left, raw_right, encoder_left, encoder_right);
+    }
 }
 
 // 占空比duty:0-10000
@@ -181,3 +193,11 @@ IFX_INTERRUPT(cc60_pit_ch0_isr, 0, CCU6_0_CH0_ISR_PRIORITY)
 
     run_direct(speed, (int16)run_get_gap()); // 5ms周期执行一次 run_direct() 函数
 }
+IFX_INTERRUPT(cc60_pit_ch1_isr, 0, CCU6_0_CH1_ISR_PRIORITY)
+{
+    interrupt_global_enable(0); // 开启中断嵌套
+    pit_clear_flag(CCU60_CH1);
+
+    uart_flag = 1; // 设置标志位，表示可以打印数据
+}
+
