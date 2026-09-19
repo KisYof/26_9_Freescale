@@ -1,13 +1,13 @@
 /**
   ******************************************************************************
   * @file    filter.h
-  * @brief   åŸºäºé€é£ FIFO çš„ç¯å½¢ç¼“å†²ä¸æ•°å­—æ»¤æ³¢æ¨¡å—å¤´æ–‡ä»¶
+  * @brief   »ùÓÚÖğ·É FIFO µÄ»·ĞÎ»º³åÓëÊı×ÖÂË²¨Ä£¿éÍ·ÎÄ¼ş
   *
-  * ä½¿ç”¨çº¦æŸ:
-  *   1. filter_ring_t ä½¿ç”¨å‰å¿…é¡»è°ƒç”¨ filter_ring_initï¼Œå¦åˆ™è¡Œä¸ºæœªå®šä¹‰
-  *   2. filter_ring_write éä¸­æ–­å®‰å…¨ï¼Œå¹¶å‘å†™å…¥åŒä¸€ ring éœ€è‡ªè¡ŒåŠ é”
-  *   3. åŒä¸€ä¸ª filter_rc_state_t å¯å®‰å…¨æ··ç”¨ä½é€š/é«˜é€š/å¸¦é€šï¼ˆå·²æ‹†åˆ†åˆå§‹åŒ–æ ‡å¿—ï¼‰
-  *   4. FILTER_MAX_WINDOW_SIZE åŒæ—¶å†³å®šç¯å½¢ç¼“å†²ä¸Šé™ä¸å†…éƒ¨æ ˆæ•°ç»„å¤§å°
+  * Ê¹ÓÃÔ¼Êø:
+  *   1. filter_ring_t Ê¹ÓÃÇ°±ØĞëµ÷ÓÃ filter_ring_init£¬·ñÔòĞĞÎªÎ´¶¨Òå
+  *   2. filter_ring_write ·ÇÖĞ¶Ï°²È«£¬²¢·¢Ğ´ÈëÍ¬Ò» ring Ğè×ÔĞĞ¼ÓËø
+  *   3. Í¬Ò»¸ö filter_rc_state_t ¿É°²È«»ìÓÃµÍÍ¨/¸ßÍ¨/´øÍ¨£¨ÒÑ²ğ·Ö³õÊ¼»¯±êÖ¾£©
+  *   4. FILTER_MAX_WINDOW_SIZE Í¬Ê±¾ö¶¨»·ĞÎ»º³åÉÏÏŞÓëÄÚ²¿Õ»Êı×é´óĞ¡
   ******************************************************************************
   */
 
@@ -20,13 +20,13 @@
 extern "C" {
 #endif
 
-#define FILTER_MAX_WINDOW_SIZE (32U)
+#define FILTER_MAX_WINDOW_SIZE (64U)
 
-/* ========================= ç±»å‹å®šä¹‰ ========================= */
+/* ========================= ÀàĞÍ¶¨Òå ========================= */
 
 /**
-  * @brief ç¯å½¢æ»¤æ³¢æ•°æ®ç¼“å†²åŒº
-  * @note  ä½¿ç”¨å‰å¿…é¡»è°ƒç”¨ filter_ring_init è¿›è¡Œåˆå§‹åŒ–
+  * @brief »·ĞÎÂË²¨Êı¾İ»º³åÇø
+  * @note  Ê¹ÓÃÇ°±ØĞëµ÷ÓÃ filter_ring_init ½øĞĞ³õÊ¼»¯
   */
 typedef struct {
     fifo_struct fifo;
@@ -36,8 +36,8 @@ typedef struct {
 } filter_ring_t;
 
 /**
-  * @brief RC æ»¤æ³¢å™¨è¿è¡ŒçŠ¶æ€
-  * @note  ä½é€š/é«˜é€š/å¸¦é€šå„è‡ªä½¿ç”¨ç‹¬ç«‹çš„åˆå§‹åŒ–æ ‡å¿—ï¼Œå¯å®‰å…¨æ··ç”¨
+  * @brief RC ÂË²¨Æ÷ÔËĞĞ×´Ì¬
+  * @note  µÍÍ¨/¸ßÍ¨/´øÍ¨¸÷×ÔÊ¹ÓÃ¶ÀÁ¢µÄ³õÊ¼»¯±êÖ¾£¬¿É°²È«»ìÓÃ
   */
 typedef struct {
     float low_pass_output;
@@ -47,14 +47,14 @@ typedef struct {
     uint8 high_pass_initialized;
 } filter_rc_state_t;
 
-/* ========================= ç¯å½¢ç¼“å†²åŒºå‡½æ•°å£°æ˜ ========================= */
+/* ========================= »·ĞÎ»º³åÇøº¯ÊıÉùÃ÷ ========================= */
 
 int8 filter_ring_init(filter_ring_t *ring, float *buffer, uint32 capacity);
 int8 filter_ring_write(filter_ring_t *ring, float value);
 uint32 filter_ring_size(filter_ring_t *ring);
 int8 filter_ring_copy(filter_ring_t *ring, float *output, uint32 output_size);
 
-/* ========================= æ»¤æ³¢ç®—æ³•å‡½æ•°å£°æ˜ ========================= */
+/* ========================= ÂË²¨Ëã·¨º¯ÊıÉùÃ÷ ========================= */
 
 float filter_median(filter_ring_t *ring);
 float filter_moving_average(filter_ring_t *ring);

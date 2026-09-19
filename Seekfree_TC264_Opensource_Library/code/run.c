@@ -69,7 +69,7 @@ PID_Controller_t pid_gap; // PD差速位置环
 
 // 编码器滤波
 // 滑动平均滤波
-#define ENCODER_FILTER_WINDOW 32  // 滑动窗口大小，最大32
+#define ENCODER_FILTER_WINDOW 32 // 滑动窗口大小，最大64
 static filter_ring_t encoder_left_ring;
 static filter_ring_t encoder_right_ring;
 static float encoder_left_buffer[ENCODER_FILTER_WINDOW];
