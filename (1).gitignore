@@ -1,0 +1,103 @@
+# ============================================
+# 逐飞 TC264 工程专用 .gitignore
+# 适用于 ADS / HighTec / Eclipse 类 IDE
+# ============================================
+
+# ------------------- 编译输出 -------------------
+# 编译生成的临时文件
+*.o
+*.obj
+*.elf
+*.hex
+*.map
+*.lst
+*.srec
+*.out
+*.exe
+
+# 调试符号文件
+*.d
+*.debug
+*.sym
+
+# 库文件（编译后生成的静态/动态库，不要提交）
+*.a
+*.lib
+*.so
+*.dll
+
+# ------------------- IDE 配置文件 -------------------
+# AURIX Development Studio (ADS) 和 Eclipse 相关
+.metadata/
+.idea/
+*.project
+*.cproject
+*.settings/
+.classpath
+.launch
+
+# HighTec IDE 相关
+*.hws  # 硬件调试配置
+*.hwc
+*.hwd
+
+# 编译器的临时索引
+.cache/
+.scannerwork/
+.remote-sync.json
+
+# ------------------- 调试和下载文件 -------------------
+# Tasking / DAS / MINIWIGGLER 调试残留
+*.jlink
+*.jflash
+*.cfg
+*.launch
+
+# 生成的下载脚本（通常不需要提交）
+*.bat
+*.cmd
+*.sh
+
+# ------------------- 逐飞库特定文件 -------------------
+# 逐飞库编译时生成的链接文件（每个工程不同，不要提交）
+Lcf_Tasking_Tricore_Tc26x.lsl
+*.lsl
+
+# 逐飞示例工程里的临时文件
+Debug/
+Release/
+Build/
+Output/
+
+# ------------------- 系统/编辑器临时文件 -------------------
+# Windows
+Thumbs.db
+desktop.ini
+
+# macOS
+.DS_Store
+
+# Linux
+*~
+
+# VSCode（如果你用VSCode编辑）
+.vscode/
+*.code-workspace
+
+# ------------------- 版本控制和备份 -------------------
+# Git 自身
+.git/
+.gitignore
+.gitattributes
+
+# 压缩包
+*.zip
+*.rar
+*.7z
+*.tar.gz
+
+# 备份文件
+*.bak
+*.swp
+*~
+*.orig

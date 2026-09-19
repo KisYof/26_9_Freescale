@@ -24,7 +24,7 @@
 * 文件名称          cpu1_main
 * 公司名称          成都逐飞科技有限公司
 * 版本信息          查看 libraries/doc 文件夹内 version 文件 版本说明
-* 开发环境          ADS v1.10.2
+* 开发环境          ADS v1.9.4
 * 适用平台          TC264D
 * 店铺链接          https://seekfree.taobao.com/
 *
@@ -34,6 +34,9 @@
 ********************************************************************************************************************/
 
 #include "zf_common_headfile.h"
+#include "Camera.h"
+#include "Camera_tool.h"
+
 #pragma section all "cpu1_dsram"
 // 将本语句与#pragma section all restore语句之间的全局变量都放在CPU1的RAM中
 
@@ -43,21 +46,30 @@
 // 本例程是开源库空工程 可用作移植或者测试各类内外设
 // 本例程是开源库空工程 可用作移植或者测试各类内外设
 
+
 void core1_main(void)
 {
     disable_Watchdog();                     // 关闭看门狗
     interrupt_global_enable(0);             // 打开全局中断
-    // 此处编写用户代码 例如外设初始化代码等
-
-
 
     // 此处编写用户代码 例如外设初始化代码等
-    cpu_wait_event_ready();                 // 等待所有核心初始化完毕
+    
+    
+    // 此处编写用户代码 例如外设初始化代码等
+
+    // 等待所有核心初始化完毕 摄像头和屏幕初始化放在CPU0
+    cpu_wait_event_ready();                 
+
+
     while (TRUE)
     {
+
         // 此处编写需要循环执行的代码
 
+        Image_Process();//图像处理
 
+        draw_tool_process();//显示二值图、中线和调试数据
+        
 
         // 此处编写需要循环执行的代码
     }

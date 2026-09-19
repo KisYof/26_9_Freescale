@@ -44,19 +44,30 @@
 // 本例程是开源库空工程 可用作移植或者测试各类内外设
 
 // **************************** 代码区域 ****************************
+
 int core0_main(void)
 {
     clock_init();                   // 获取时钟频率<务必保留>
     debug_init();                   // 初始化默认调试串口
     // 此处编写用户代码 例如外设初始化代码等
+    cpu_wait_event_ready();
 
     run_init();
 
-    // 此处编写用户代码 例如外设初始化代码等
-    cpu_wait_event_ready();         // 等待所有核心初始化完毕
+    //ips屏幕初始化
+    ips200_set_dir(IPS200_PORTAIT); 
+    ips200_init(IPS200_TYPE_SPI);
+
+    //摄像头初始化
+    mt9v03x_init(); 
+
+    // //摄像头测试，先跳过启动按键
+    // go = 1;
+    // Motor_Flag = 0;
     while (TRUE)
     {
         // 此处编写需要循环执行的代码
+        draw_tool_process();
 
         run_while();
 
@@ -65,3 +76,4 @@ int core0_main(void)
 }
 #pragma section all restore
 // **************************** 代码区域 ****************************
+
