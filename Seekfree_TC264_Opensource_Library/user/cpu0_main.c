@@ -1,66 +1,171 @@
-/*********************************************************************************************************************
-* TC264 Opensourec Library ¼´£¨TC264 ¿ªÔ´¿â£©ÊÇÒ»¸ö»ùÓÚ¹Ù·½ SDK ½Ó¿ÚµÄµÚÈı·½¿ªÔ´¿â
-* Copyright (c) 2022 SEEKFREE Öğ·É¿Æ¼¼
-*
-* ±¾ÎÄ¼şÊÇ TC264 ¿ªÔ´¿âµÄÒ»²¿·Ö
-*
-* TC264 ¿ªÔ´¿â ÊÇÃâ·ÑÈí¼ş
-* Äú¿ÉÒÔ¸ù¾İ×ÔÓÉÈí¼ş»ù½ğ»á·¢²¼µÄ GPL£¨GNU General Public License£¬¼´ GNUÍ¨ÓÃ¹«¹²Ğí¿ÉÖ¤£©µÄÌõ¿î
-* ¼´ GPL µÄµÚ3°æ£¨¼´ GPL3.0£©»ò£¨ÄúÑ¡ÔñµÄ£©ÈÎºÎºóÀ´µÄ°æ±¾£¬ÖØĞÂ·¢²¼ºÍ/»òĞŞ¸ÄËü
-*
-* ±¾¿ªÔ´¿âµÄ·¢²¼ÊÇÏ£ÍûËüÄÜ·¢»Ó×÷ÓÃ£¬µ«²¢Î´¶ÔÆä×÷ÈÎºÎµÄ±£Ö¤
-* ÉõÖÁÃ»ÓĞÒşº¬µÄÊÊÏúĞÔ»òÊÊºÏÌØ¶¨ÓÃÍ¾µÄ±£Ö¤
-* ¸ü¶àÏ¸½ÚÇë²Î¼û GPL
-*
-* ÄúÓ¦¸ÃÔÚÊÕµ½±¾¿ªÔ´¿âµÄÍ¬Ê±ÊÕµ½Ò»·İ GPL µÄ¸±±¾
-* Èç¹ûÃ»ÓĞ£¬Çë²ÎÔÄ<https://www.gnu.org/licenses/>
-*
-* ¶îÍâ×¢Ã÷£º
-* ±¾¿ªÔ´¿âÊ¹ÓÃ GPL3.0 ¿ªÔ´Ğí¿ÉÖ¤Ğ­Òé ÒÔÉÏĞí¿ÉÉêÃ÷ÎªÒëÎÄ°æ±¾
-* Ğí¿ÉÉêÃ÷Ó¢ÎÄ°æÔÚ libraries/doc ÎÄ¼ş¼ĞÏÂµÄ GPL3_permission_statement.txt ÎÄ¼şÖĞ
-* Ğí¿ÉÖ¤¸±±¾ÔÚ libraries ÎÄ¼ş¼ĞÏÂ ¼´¸ÃÎÄ¼ş¼ĞÏÂµÄ LICENSE ÎÄ¼ş
-* »¶Ó­¸÷Î»Ê¹ÓÃ²¢´«²¥±¾³ÌĞò µ«ĞŞ¸ÄÄÚÈİÊ±±ØĞë±£ÁôÖğ·É¿Æ¼¼µÄ°æÈ¨ÉùÃ÷£¨¼´±¾ÉùÃ÷£©
-*
-* ÎÄ¼şÃû³Æ          cpu0_main
-* ¹«Ë¾Ãû³Æ          ³É¶¼Öğ·É¿Æ¼¼ÓĞÏŞ¹«Ë¾
-* °æ±¾ĞÅÏ¢          ²é¿´ libraries/doc ÎÄ¼ş¼ĞÄÚ version ÎÄ¼ş °æ±¾ËµÃ÷
-* ¿ª·¢»·¾³          ADS v1.10.2
-* ÊÊÓÃÆ½Ì¨          TC264D
-* µêÆÌÁ´½Ó          https://seekfree.taobao.com/
-*
-* ĞŞ¸Ä¼ÇÂ¼
-* ÈÕÆÚ              ×÷Õß                ±¸×¢
-* 2022-09-15       pudding            first version
-********************************************************************************************************************/
+
 #include "zf_common_headfile.h"
 #pragma section all "cpu0_dsram"
 
-#include "run.h"
+#define fuya_flag 1
 
-// ½«±¾Óï¾äÓë#pragma section all restoreÓï¾äÖ®¼äµÄÈ«¾Ö±äÁ¿¶¼·ÅÔÚCPU0µÄRAMÖĞ
-
-// ±¾Àı³ÌÊÇ¿ªÔ´¿â¿Õ¹¤³Ì ¿ÉÓÃ×÷ÒÆÖ²»òÕß²âÊÔ¸÷ÀàÄÚÍâÉè
-// ±¾Àı³ÌÊÇ¿ªÔ´¿â¿Õ¹¤³Ì ¿ÉÓÃ×÷ÒÆÖ²»òÕß²âÊÔ¸÷ÀàÄÚÍâÉè
-// ±¾Àı³ÌÊÇ¿ªÔ´¿â¿Õ¹¤³Ì ¿ÉÓÃ×÷ÒÆÖ²»òÕß²âÊÔ¸÷ÀàÄÚÍâÉè
-
-// **************************** ´úÂëÇøÓò ****************************
 int core0_main(void)
 {
-    clock_init();                   // »ñÈ¡Ê±ÖÓÆµÂÊ<Îñ±Ø±£Áô>
-    debug_init();                   // ³õÊ¼»¯Ä¬ÈÏµ÷ÊÔ´®¿Ú
-    // ´Ë´¦±àĞ´ÓÃ»§´úÂë ÀıÈçÍâÉè³õÊ¼»¯´úÂëµÈ
+    clock_init();
+    debug_init();
+    adc_init(ADC0_CH5_A5,ADC_12BIT);
+//        pwm_init(ATOM1_CH7_P00_8,100,1200);//æµ‹è¯•ç”µè°ƒä¸“ç”¨
+//        pwm_init(ATOM3_CH0_P33_4,100,1200);
+//    pwm_init(ATOM1_CH1_P33_9, 50,775);                     //èˆµæœºä¸­å€¼åˆå§‹åŒ–
+    PID_Init();                                             //pidåˆå§‹åŒ–
 
-    run_init();
 
-    // ´Ë´¦±àĞ´ÓÃ»§´úÂë ÀıÈçÍâÉè³õÊ¼»¯´úÂëµÈ
-    cpu_wait_event_ready();         // µÈ´ıËùÓĞºËĞÄ³õÊ¼»¯Íê±Ï
+    ips200_set_dir(IPS200_PORTAIT);                         //ipså±å¹•åˆå§‹åŒ–
+    ips200_init(IPS200_TYPE_SPI);
+
+    gpio_init(P20_10,GPI,1, GPI_PULL_UP);                   //å¯åŠ¨æŒ‰é”®åˆå§‹åŒ–
+    gpio_init(P11_2,GPI,1, GPI_PULL_UP);                    //æ‹¨ç å¼€å…³1åˆå§‹åŒ–
+    gpio_init(P11_3,GPI,1, GPI_PULL_UP);                    //æ‹¨ç å¼€å…³2åˆå§‹åŒ–
+    gpio_init(P11_6,GPI,1, GPI_PULL_UP);                    //æ‹¨ç å¼€å…³3åˆå§‹åŒ–
+    gpio_init(P33_9,GPO,0, GPO_PUSH_PULL);                  //åˆå§‹åŒ–ç¯æ¿IOä¸ºä½ç”µå¹³
+//    gpio_init(P20_8,GPO,0, GPO_PUSH_PULL);                  //åˆå§‹åŒ–ç¯æ¿IOä¸ºä½ç”µå¹³
+
+    mt9v03x_init();                                         //æ‘„åƒå¤´åˆå§‹åŒ–
+//    Image_CutInit();                                        //å›¾åƒæŒ‡é’ˆæ˜ å°„
+    /************menu*******************/
+//      Menu_Open();
+    /************menu*******************/
+    PWMInit();
+//    imu660ra_init();
+   // kalman1_init(&kalman_gyro,1,100);
+
+    uart_init(UART_2,115200,UART2_TX_P10_5,UART2_RX_P10_6);
+    uart_rx_interrupt(UART_2, 1);
+
+
+    Encoder_init();                                         //ç¼–ç å™¨åˆå§‹åŒ–
+    pit_ms_init(CCU60_CH0,2);                               //ç¼–ç å™¨ä¸­æ–­
+    pit_ms_init(CCU60_CH1,8);                              //è½¬å‘ç¯ä¸­æ–­
+    pit_ms_init(CCU61_CH0,4);                               //å‡ºç•Œä¿æŠ¤
+//    pit_ms_init(CCU61_CH1,2);                                    //é™€èºä»ªç§¯åˆ†
+
+//    Mymenu_main();
+    draw_tool_process();
+
+    if(Speed_FS_Flag==1)
+    {
+        if(PWM_MAX==8000)
+        {
+            fuzzy_p=4.385;
+            fuzzy_d=14.350;
+        }
+        else if(PWM_MAX==9000)
+
+
+        {
+            fuzzy_p=5.580;
+            fuzzy_d=16.250;
+        }
+        else if(PWM_MAX==9999)
+        {
+            fuzzy_p=4.380;
+            fuzzy_d=14.251;
+        }
+    }
+    go=0;
+    system_delay_ms(300);
+//    mt9v03x_set_exposure_time(exposure_time);
+
+    //è§†è§‰æµ‹è¯•æ¨¡å¼ï¼Œå…ˆè·³è¿‡å¯åŠ¨æŒ‰é”®
+    go = 1;
+    Motor_Flag = 0;
+
+/*    while(go==0&&Fuya_Flag==1)
+    {
+        if(gpio_get_level(P20_10)==0){
+            system_delay_ms(5);//å»¶æ—¶10MSï¼Œæ¶ˆæŠ–æ»¤æ³¢
+            if(gpio_get_level(P20_10)==0){
+                    pwm_init(ATOM1_CH7_P00_8,100,1000);
+                    pwm_init(ATOM3_CH0_P33_4,100,1000);
+                    go=1;
+            }
+        }
+    }*/
+
+
+
+
+    system_delay_ms(1000);
+
+    if(Fuya_Flag==1)
+    Fuya_up();
+
+
+    pit_ms_init(CCU60_CH1,8);                              //è½¬å‘ç¯ä¸­æ–­
+    system_delay_ms(300);
+//    go=0;
+//    Mymenu_Init();
+    cpu_wait_event_ready();
     while (TRUE)
     {
-        // ´Ë´¦±àĞ´ĞèÒªÑ­»·Ö´ĞĞµÄ´úÂë
 
-        system_delay_ms(5);
-        // ´Ë´¦±àĞ´ĞèÒªÑ­»·Ö´ĞĞµÄ´úÂë
+
+        if(cc60_ch0_flag==1)
+        {
+//            printf("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",(float)go,(float)ImageStatus.Det_True,(float)ENCO_Wish_L,(float)ENCO_Wish_R,(float)encoder_data_1,(float)encoder_data_2);
+
+                if(Distance_start<30)//è®¡ç®—å¼€å§‹å‘è½¦æ—¶èµ°çš„è·ç¦»
+                    Distance_start=Distance_start+((R_speed+L_speed)/2)*100*0.002;//æ€»è·ç¦»
+
+                if((ImageFlag.Stop==1&&Distance>=stop_distance)||ImageFlag.chujie_Stop_1==1||Distance_start<2||go==0)//Distance_start<2å½“è½¦èµ°äº†2å˜ç±³æ‰å¼€ç¯
+                {
+                    gpio_set_level(P33_9,0);
+
+//                    pwm_set_duty(ATOM1_CH7_P00_8,0);
+//                    pwm_set_duty(ATOM3_CH0_P33_4,0);
+                }
+                else
+                    gpio_set_level(P33_9,1);
+                if(go==0)
+                    ImageFlag.chujie_Stop_1==1;
+                if(Motor_Flag==1)
+                Motor_control();
+
+
+            cc60_ch0_flag=0;
+        }
+        else if(cc60_ch1_flag==1)
+        {
+
+
+            cc60_ch1_flag=0;
+        }
+//        else
+        else if(cc61_ch0_flag==1)
+        {
+            cc61_ch0_flag=0;
+        }
     }
 }
+
+void uart_rx_interrupt_handler (void)
+{
+//    get_data = uart_read_byte(UART_INDEX);
+//    printf("%.2f,%.2f,%.2f,%.2f,%.2f",1,1,0,0,0);
+//             printf("\n");// æ¥æ”¶æ•°æ® while ç­‰å¾…å¼ ä¸å»ºè®®åœ¨ä¸­æ–­ä½¿ç”¨
+    uart_query_byte(UART_2, &RxBuffer[0]);                                     // æ¥æ”¶æ•°æ® æŸ¥è¯¢å¼ æœ‰æ•°æ®ä¼šè¿”å› TRUE æ²¡æœ‰æ•°æ®ä¼šè¿”å› FALSE
+    RxLine++;
+        DataBuff[RxLine - 1] = RxBuffer[0];
+//        printf("%.2f,%.2f,%.2f,%.2f,%.2f",RxBuffer[0],RxLine,1,0,0);
+//                     printf("\n");
+        if (RxBuffer[0] == '!')
+             {
+                 printf("RXLen=%d\r\n", RxLine);
+                for (int i = 0; i < RxLine; i++)
+                    printf("UART DataBuff[%d] = %c\r\n", i, DataBuff[i]);
+
+                 USART_PID_Adjust(1);
+                 memset(DataBuff, 0, sizeof(DataBuff));
+                 RxLine = 0;
+             }
+}
+
+
 #pragma section all restore
-// **************************** ´úÂëÇøÓò ****************************
+
+
