@@ -1,8 +1,8 @@
 /**
   ******************************************************************************
   * @file    pid.h
-  * @brief   é€šç”¨PIDè°ƒèŠ‚æ ¸å¿ƒæ¨¡å—å¤´æ–‡ä»¶
-  * @note    double ç±»å‹ç”± pid_types.h å®šä¹‰ï¼Œæ”¯æŒæµ®ç‚¹ / Q12 å®šç‚¹åŒæ¨¡å¼
+  * @brief   Í¨ÓÃPIDµ÷½ÚºËĞÄÄ£¿éÍ·ÎÄ¼ş
+  * @note    double ÀàĞÍÓÉ pid_types.h ¶¨Òå£¬Ö§³Ö¸¡µã / Q12 ¶¨µãË«Ä£Ê½
   ******************************************************************************
   */
 
@@ -14,10 +14,10 @@ extern "C" {
 #endif
 
 
-/* ========================= ç±»å‹å®šä¹‰ ========================= */
+/* ========================= ÀàĞÍ¶¨Òå ========================= */
 
 /**
-  * @brief ä½ç½®å¼ PID æ§åˆ¶å™¨ç»“æ„ä½“
+  * @brief Î»ÖÃÊ½ PID ¿ØÖÆÆ÷½á¹¹Ìå
   */
 typedef struct {
     double Kp;
@@ -39,7 +39,7 @@ typedef struct {
 } PID_Pos_t;
 
 /**
-  * @brief å¢é‡å¼ PID æ§åˆ¶å™¨ç»“æ„ä½“
+  * @brief ÔöÁ¿Ê½ PID ¿ØÖÆÆ÷½á¹¹Ìå
   */
 typedef struct {
     double Kp;
@@ -61,7 +61,7 @@ typedef struct {
 
 
 /**
-  * @brief PID æ§åˆ¶ç®—æ³•ç±»å‹
+  * @brief PID ¿ØÖÆËã·¨ÀàĞÍ
   */
 typedef enum {
     PID_ALGORITHM_NONE = 0,
@@ -70,14 +70,14 @@ typedef enum {
 } PID_Algorithm_t;
 
 /**
-  * @brief PID æ§åˆ¶ç®—æ³•å‡½æ•°æŒ‡é’ˆç±»å‹
+  * @brief PID ¿ØÖÆËã·¨º¯ÊıÖ¸ÕëÀàĞÍ
   */
 typedef double (*PID_CalcFunc_t)(void *controller,
                                  double target, double actual);
 
 /**
-  * @brief ç»Ÿä¸€ PID æ§åˆ¶å™¨
-  * @note ç”± algorithm é€‰æ‹© union ä¸­å®é™…ç”Ÿæ•ˆçš„æ§åˆ¶å™¨
+  * @brief Í³Ò» PID ¿ØÖÆÆ÷
+  * @note ÓÉ algorithm Ñ¡Ôñ union ÖĞÊµ¼ÊÉúĞ§µÄ¿ØÖÆÆ÷
   */
 typedef struct {
     PID_Algorithm_t algorithm;
@@ -89,14 +89,14 @@ typedef struct {
 } PID_Controller_t;
 
 /**
-  * @brief Bang-Bang æ§åˆ¶å™¨ç»“æ„ä½“
+  * @brief Bang-Bang ¿ØÖÆÆ÷½á¹¹Ìå
   */
 typedef struct {
     double deadband;
     PID_Controller_t *controller;
 } PID_BangBang_t;
 
-/* ========================= å…¬å…±å‡½æ•°å£°æ˜ ========================= */
+/* ========================= ¹«¹²º¯ÊıÉùÃ÷ ========================= */
 void PID_Controller_Init(PID_Controller_t *controller, PID_Algorithm_t algorithm,
                          double kp, double ki, double kd, double outMax,
                          double outMin, double intMax, double intMin);
