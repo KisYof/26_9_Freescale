@@ -127,6 +127,17 @@ void run_servo_motor_angle(int8 angle)
     pwm_set_duty(SERVO_MOTOR_PWM, (uint32)SERVO_MOTOR_DUTY(90 - angle));
 }
 
+// 通过视觉获取小车差速值和舵机转向值
+double run_get_gap(void)
+{
+    double gap = 0;
+
+    // 这里读取视觉数据，并做出滤波，PD调节输出后轮差速值
+    //  gap =
+
+    return gap;
+}
+
 // speed：速度值，正值前进，负值后退
 // gap: 左右电机速度差值，正值右转，负值左转
 void run_direct(int16 speed, int16 gap)
@@ -149,5 +160,5 @@ IFX_INTERRUPT(cc60_pit_ch0_isr, 0, CCU6_0_CH0_ISR_PRIORITY)
     interrupt_global_enable(0); // 开启中断嵌套
     pit_clear_flag(CCU60_CH0);
 
-    run_direct(speed, 0); // 5ms周期执行一次 run_direct() 函数
+    run_direct(speed, (int16)run_get_gap()); // 5ms周期执行一次 run_direct() 函数
 }
