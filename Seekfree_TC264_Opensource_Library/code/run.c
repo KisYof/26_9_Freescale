@@ -68,6 +68,14 @@ PID_Controller_t pid_right;
 PID_Controller_t pid_gap; // PD差速位置环
 
 // 编码器滤波
+// 滑动平均滤波
+#define ENCODER_FILTER_WINDOW 32  // 滑动窗口大小，最大32
+static filter_ring_t encoder_left_ring;
+static filter_ring_t encoder_right_ring;
+static float encoder_left_buffer[ENCODER_FILTER_WINDOW];
+static float encoder_right_buffer[ENCODER_FILTER_WINDOW];
+
+// rc低通滤波器
 static filter_rc_state_t encoder_left_filter;
 static filter_rc_state_t encoder_right_filter;
 
@@ -95,6 +103,10 @@ void run_init(void)
 
     // 转向位置环
     PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 0.3, 0.0, 0.0, 50, -50, 0, 0);
+
+    // 编码器平均滤波初始化
+    filter_ring_init(&encoder_left_ring, encoder_left_buffer, ENCODER_FILTER_WINDOW);
+    filter_ring_init(&encoder_right_ring, encoder_right_buffer, ENCODER_FILTER_WINDOW);
 
     // 编码器低通滤波滤波初始化
     filter_rc_state_reset(&encoder_left_filter);
@@ -169,13 +181,17 @@ double run_get_gap(void)
 // gap: 左右电机速度差值，正值右转，负值左转
 void run_direct(int16 speed, int16 gap)
 {
-    raw_left = -encoder_get_count(ENCODER_1); // 获取编码器计数
-    encoder_left = CALC_LINE_SPEED_CM_S(raw_left); // 获取编码器计数
+    raw_left = CALC_LINE_SPEED_CM_S(-encoder_get_count(ENCODER_1)); // 获取编码器计数
+    encoder_left = raw_left;
+    filter_ring_write(&encoder_left_ring, encoder_left); // 写入新数据
+    encoder_left = filter_moving_average(&encoder_left_ring);
     encoder_left = filter_rc_low_pass(&encoder_left_filter, encoder_left, 0.2);
     encoder_clear_count(ENCODER_1); // 清空编码器计数
 
-    raw_right = encoder_get_count(ENCODER_2); // 获取编码器计数
-    encoder_right = CALC_LINE_SPEED_CM_S(raw_right); // 获取编码器计数
+    raw_right = CALC_LINE_SPEED_CM_S(encoder_get_count(ENCODER_2)); // 获取编码器计数
+    encoder_right = raw_right;
+    filter_ring_write(&encoder_right_ring, encoder_right); // 写入新数据
+    encoder_right = filter_moving_average(&encoder_right_ring);
     encoder_right = filter_rc_low_pass(&encoder_right_filter, encoder_right, 0.2);
     encoder_clear_count(ENCODER_2); // 清空编码器计数
 
