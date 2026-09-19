@@ -1,5 +1,6 @@
 #include "run.h"
 #include "pid.h"
+#include "filter.h"
 
 // 电机相关
 #define DIR_R2 (P21_2) // 实际使用的电机组
@@ -55,12 +56,19 @@
 #endif
 
 // 全局变量
+int16 raw_left = 0;
+int16 raw_right = 0;
 int16 encoder_left = 0;
 int16 encoder_right = 0;
 int16 speed = 10;
 
 PID_Controller_t pid_left;
 PID_Controller_t pid_right;
+PID_Controller_t pid_gap; // PD差速位置环
+
+// 编码器滤波
+static filter_rc_state_t encoder_left_filter;
+static filter_rc_state_t encoder_right_filter;
 
 void run_init(void)
 {
@@ -79,8 +87,15 @@ void run_init(void)
     pwm_init(SERVO_MOTOR_PWM, SERVO_MOTOR_FREQ, 0);
 
     // 电机PID初始化
-    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 30, 1.0, 0.0, 1500, -1500, 0, 0);
-    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 30, 1.0, 0.0, 1500, -1500, 0, 0);
+    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 1, 0.1, 0.0, 1500, -1500, 0, 0);
+    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 1, 0.1, 0.0, 1500, -1500, 0, 0);
+
+    // 转向位置环
+    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 0.3, 0.0, 0.0, 50, -50, 0, 0);
+
+    // 编码器低通滤波滤波初始化
+    filter_rc_state_reset(&encoder_left_filter);
+    filter_rc_state_reset(&encoder_right_filter);
 }
 
 // 占空比duty:0-10000
@@ -142,11 +157,15 @@ double run_get_gap(void)
 // gap: 左右电机速度差值，正值右转，负值左转
 void run_direct(int16 speed, int16 gap)
 {
-    encoder_left = -CALC_LINE_SPEED_CM_S(encoder_get_count(ENCODER_1)); // 获取编码器计数
-    encoder_clear_count(ENCODER_1);                                    // 清空编码器计数
+    raw_left = -encoder_get_count(ENCODER_1); // 获取编码器计数
+    encoder_left = CALC_LINE_SPEED_CM_S(raw_left); // 获取编码器计数
+    encoder_left = filter_rc_low_pass(&encoder_left_filter, encoder_left, 0.2);
+    encoder_clear_count(ENCODER_1); // 清空编码器计数
 
-    encoder_right = CALC_LINE_SPEED_CM_S(encoder_get_count(ENCODER_2)); // 获取编码器计数
-    encoder_clear_count(ENCODER_2);                                     // 清空编码器计数
+    raw_right = encoder_get_count(ENCODER_2); // 获取编码器计数
+    encoder_right = CALC_LINE_SPEED_CM_S(raw_right); // 获取编码器计数
+    encoder_right = filter_rc_low_pass(&encoder_right_filter, encoder_right, 0.2);
+    encoder_clear_count(ENCODER_2); // 清空编码器计数
 
     int16 left_speed = (int16)PID_Controller_Calc(&pid_left, speed, encoder_left);
     int16 right_speed = (int16)PID_Controller_Calc(&pid_right, speed, encoder_right);
