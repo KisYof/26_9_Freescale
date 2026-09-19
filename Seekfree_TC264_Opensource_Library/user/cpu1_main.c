@@ -36,8 +36,7 @@
 #include "zf_common_headfile.h"
 #include "Camera.h"
 #include "Camera_tool.h"
-#include "Encoder.h"
-#include "ProcessProperty.h"
+
 #pragma section all "cpu1_dsram"
 // 将本语句与#pragma section all restore语句之间的全局变量都放在CPU1的RAM中
 
@@ -47,20 +46,19 @@
 // 本例程是开源库空工程 可用作移植或者测试各类内外设
 // 本例程是开源库空工程 可用作移植或者测试各类内外设
 
-uint8 xianshi_time;
-int use_time=0,max_time=0;
+
 void core1_main(void)
 {
     disable_Watchdog();                     // 关闭看门狗
     interrupt_global_enable(0);             // 打开全局中断
 
     // 此处编写用户代码 例如外设初始化代码等
-    Flag_init();//图像元素标志位初始化
-    Element_Data_Init();//元素数据初始化
-    Data_init();//图像处理的一些阈值的写入 放在Element_Data_Init后面
+    
+    
     // 此处编写用户代码 例如外设初始化代码等
 
-    cpu_wait_event_ready();                 // 等待所有核心初始化完毕
+    // 等待所有核心初始化完毕 摄像头和屏幕初始化放在CPU0
+    cpu_wait_event_ready();                 
 
 
     while (TRUE)
@@ -70,17 +68,8 @@ void core1_main(void)
 
         Image_Process();//图像处理
 
-        draw_tool_process();
-
-        //只有停车、未发车、停止或者电机没有运行时，才刷新屏幕。
-        /*if(go==0||(ImageFlag.Stop==1&&jifen_Stop==1)||ImageFlag.chujie_Stop_1==1||Motor_Flag==0)
-        {
-            draw_tool_process();//在屏幕上画图像
-        }*/
-        if(Speed_Decision_Flag==1)
-        {
-            Speed_Decision();//速度决策
-        }
+        draw_tool_process();//显示二值图、中线和调试数据
+        
 
         // 此处编写需要循环执行的代码
     }

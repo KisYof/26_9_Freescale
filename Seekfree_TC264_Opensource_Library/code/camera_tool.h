@@ -25,13 +25,6 @@ extern uint8 right_disline[LCDH][2];
 extern uint8 left_disline[LCDH][2];
 extern uint8 mid_disline[LCDH][2];
 
-extern uint32 Time_counter;
-
-void put_line_to_array(void);
-void array_to_disarray(void);
-void ips200_draw_rgb_point(uint8 x,uint8 y,uint8 color);
-void ips200_draw_side_line(uint8 line_r[],uint8 line_l[]);
-void ips200_draw_mid_line(uint8 line_mid[]);
 void draw_tool_process(void);
 
 
