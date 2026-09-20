@@ -1,6 +1,7 @@
 #include "run.h"
 #include "pid.h"
 #include "filter.h"
+#include "camera.h"
 
 // 电机相关
 #define DIR_R2 (P21_2) // 实际使用的电机组
@@ -68,6 +69,14 @@ PID_Controller_t pid_right;
 PID_Controller_t pid_gap; // PD差速位置环
 
 // 编码器滤波
+// 滑动平均滤波
+#define ENCODER_FILTER_WINDOW 32 // 滑动窗口大小，最大64
+static filter_ring_t encoder_left_ring;
+static filter_ring_t encoder_right_ring;
+static float encoder_left_buffer[ENCODER_FILTER_WINDOW];
+static float encoder_right_buffer[ENCODER_FILTER_WINDOW];
+
+// rc低通滤波器
 static filter_rc_state_t encoder_left_filter;
 static filter_rc_state_t encoder_right_filter;
 
@@ -96,6 +105,10 @@ void run_init(void)
     // 转向位置环
     PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 0.3, 0.0, 0.0, 50, -50, 0, 0);
 
+    // 编码器平均滤波初始化
+    filter_ring_init(&encoder_left_ring, encoder_left_buffer, ENCODER_FILTER_WINDOW);
+    filter_ring_init(&encoder_right_ring, encoder_right_buffer, ENCODER_FILTER_WINDOW);
+
     // 编码器低通滤波滤波初始化
     filter_rc_state_reset(&encoder_left_filter);
     filter_rc_state_reset(&encoder_right_filter);
@@ -115,12 +128,12 @@ void run_motor_left_speed(int16 duty)
 {
     if (duty >= 0) // 正转
     {
-        gpio_set_level(DIR_L2, GPIO_LOW);                   // DIR输出低电平
+        gpio_set_level(DIR_L2, GPIO_HIGH);                   // DIR输出高电平
         pwm_set_duty(PWM_L2, duty * (PWM_DUTY_MAX / 10000)); // 计算占空比
     }
     else // 反转
     {
-        gpio_set_level(DIR_L2, GPIO_HIGH);                       // DIR输出高电平
+        gpio_set_level(DIR_L2, GPIO_LOW);                       // DIR输出低电平
         pwm_set_duty(PWM_L2, (-duty) * (PWM_DUTY_MAX / 10000)); // 计算占空比
     }
 }
@@ -130,12 +143,12 @@ void run_motor_right_speed(int16 duty)
 {
     if (duty >= 0) // 正转
     {
-        gpio_set_level(DIR_R2, GPIO_HIGH);                    // DIR输出高电平
+        gpio_set_level(DIR_R2, GPIO_LOW);                    // DIR输出低电平
         pwm_set_duty(PWM_R2, duty * (PWM_DUTY_MAX / 10000)); // 计算占空比
     }
     else // 反转
     {
-        gpio_set_level(DIR_R2, GPIO_LOW);                      // DIR输出低电平
+        gpio_set_level(DIR_R2, GPIO_HIGH);                      // DIR输出高电平
         pwm_set_duty(PWM_R2, (-duty) * (PWM_DUTY_MAX / 10000)); // 计算占空比
     }
 }
@@ -160,7 +173,10 @@ double run_get_gap(void)
     double gap = 0;
 
     // 这里读取视觉数据，并做出滤波，PD调节输出后轮差速值
-    //  gap =
+        if (NormalMidValid)
+        {
+            gap = PID_Controller_Calc(&pid_gap, 0, (double)NormalMidError);
+        }
 
     return gap;
 }
@@ -169,13 +185,17 @@ double run_get_gap(void)
 // gap: 左右电机速度差值，正值右转，负值左转
 void run_direct(int16 speed, int16 gap)
 {
-    raw_left = -encoder_get_count(ENCODER_1); // 获取编码器计数
-    encoder_left = CALC_LINE_SPEED_CM_S(raw_left); // 获取编码器计数
+    raw_left = CALC_LINE_SPEED_CM_S(-encoder_get_count(ENCODER_1)); // 获取编码器计数
+    encoder_left = raw_left;
+    filter_ring_write(&encoder_left_ring, encoder_left); // 写入新数据
+    encoder_left = filter_moving_average(&encoder_left_ring);
     encoder_left = filter_rc_low_pass(&encoder_left_filter, encoder_left, 0.2);
     encoder_clear_count(ENCODER_1); // 清空编码器计数
 
-    raw_right = encoder_get_count(ENCODER_2); // 获取编码器计数
-    encoder_right = CALC_LINE_SPEED_CM_S(raw_right); // 获取编码器计数
+    raw_right = CALC_LINE_SPEED_CM_S(encoder_get_count(ENCODER_2)); // 获取编码器计数
+    encoder_right = raw_right;
+    filter_ring_write(&encoder_right_ring, encoder_right); // 写入新数据
+    encoder_right = filter_moving_average(&encoder_right_ring);
     encoder_right = filter_rc_low_pass(&encoder_right_filter, encoder_right, 0.2);
     encoder_clear_count(ENCODER_2); // 清空编码器计数
 
@@ -192,6 +212,7 @@ IFX_INTERRUPT(cc60_pit_ch0_isr, 0, CCU6_0_CH0_ISR_PRIORITY)
     pit_clear_flag(CCU60_CH0);
 
     run_direct(speed, (int16)run_get_gap()); // 5ms周期执行一次 run_direct() 函数
+    run_servo_motor_angle((int8)run_get_gap());
 }
 IFX_INTERRUPT(cc60_pit_ch1_isr, 0, CCU6_0_CH1_ISR_PRIORITY)
 {

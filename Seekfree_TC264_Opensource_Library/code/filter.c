@@ -1,17 +1,17 @@
 /**
  ******************************************************************************
  * @file    filter.c
- * @brief   åŸºäºé€é£ FIFO çš„ç¯å½¢ç¼“å†²ä¸æ•°å­—æ»¤æ³¢æ¨¡å—
+ * @brief   »ùÓÚÖğ·É FIFO µÄ»·ĞÎ»º³åÓëÊı×ÖÂË²¨Ä£¿é
  ******************************************************************************
  */
 #include "filter.h"
 
-/* ========================= å†…éƒ¨å‡½æ•°å®ç° ========================= */
+/* ========================= ÄÚ²¿º¯ÊıÊµÏÖ ========================= */
 
 /**
- * @brief  å°† float æ•°æ®è½¬æ¢ä¸º FIFO ä½¿ç”¨çš„ uint32 æ•°æ®
- * @param  value: float æ•°æ®
- * @retval å¯¹åº”çš„ uint32 ä½æ¨¡å¼
+ * @brief  ½« float Êı¾İ×ª»»Îª FIFO Ê¹ÓÃµÄ uint32 Êı¾İ
+ * @param  value: float Êı¾İ
+ * @retval ¶ÔÓ¦µÄ uint32 Î»Ä£Ê½
  */
 static uint32 filter_float_to_uint32(float value)
 {
@@ -21,9 +21,9 @@ static uint32 filter_float_to_uint32(float value)
 }
 
 /**
- * @brief  å°† FIFO ä¸­çš„ uint32 æ•°æ®è½¬æ¢ä¸º float æ•°æ®
- * @param  data: uint32 ä½æ¨¡å¼
- * @retval å¯¹åº”çš„ float æ•°æ®
+ * @brief  ½« FIFO ÖĞµÄ uint32 Êı¾İ×ª»»Îª float Êı¾İ
+ * @param  data: uint32 Î»Ä£Ê½
+ * @retval ¶ÔÓ¦µÄ float Êı¾İ
  */
 static float filter_uint32_to_float(uint32 data)
 {
@@ -33,10 +33,10 @@ static float filter_uint32_to_float(uint32 data)
 }
 
 /**
- * @brief  å¿«é€Ÿæ’åº
- * @param  array: å¾…æ’åºæ•°ç»„
- * @param  left: æ’åºåŒºé—´å·¦è¾¹ç•Œ
- * @param  right: æ’åºåŒºé—´å³è¾¹ç•Œ
+ * @brief  ¿ìËÙÅÅĞò
+ * @param  array: ´ıÅÅĞòÊı×é
+ * @param  left: ÅÅĞòÇø¼ä×ó±ß½ç
+ * @param  right: ÅÅĞòÇø¼äÓÒ±ß½ç
  * @retval None
  */
 static void filter_quick_sort(float *array, int32 left, int32 right)
@@ -64,9 +64,9 @@ static void filter_quick_sort(float *array, int32 left, int32 right)
 }
 
 /**
- * @brief  é™åˆ¶ RC æ»¤æ³¢ç³»æ•°èŒƒå›´
- * @param  alpha: åŸå§‹æ»¤æ³¢ç³»æ•°
- * @retval é™åˆ¶åœ¨ 0 åˆ° 1 èŒƒå›´å†…çš„æ»¤æ³¢ç³»æ•°
+ * @brief  ÏŞÖÆ RC ÂË²¨ÏµÊı·¶Î§
+ * @param  alpha: Ô­Ê¼ÂË²¨ÏµÊı
+ * @retval ÏŞÖÆÔÚ 0 µ½ 1 ·¶Î§ÄÚµÄÂË²¨ÏµÊı
  */
 static float filter_clamp_alpha(float alpha)
 {
@@ -75,14 +75,14 @@ static float filter_clamp_alpha(float alpha)
     return alpha;
 }
 
-/* ========================= ç¯å½¢ç¼“å†²åŒºå®ç° ========================= */
+/* ========================= »·ĞÎ»º³åÇøÊµÏÖ ========================= */
 
 /**
- * @brief  åˆå§‹åŒ–ç¯å½¢æ»¤æ³¢æ•°æ®ç¼“å†²åŒº
- * @param  ring: ç¯å½¢ç¼“å†²åŒºç»“æ„ä½“æŒ‡é’ˆ
- * @param  buffer: ç”¨æˆ·æä¾›çš„ float æ•°ç»„
- * @param  capacity: ç¯å½¢ç¼“å†²åŒºå®¹é‡ï¼Œæœ€å¤§ä¸º FILTER_MAX_WINDOW_SIZE
- * @retval 1 åˆå§‹åŒ–æˆåŠŸï¼Œ0 åˆå§‹åŒ–å¤±è´¥
+ * @brief  ³õÊ¼»¯»·ĞÎÂË²¨Êı¾İ»º³åÇø
+ * @param  ring: »·ĞÎ»º³åÇø½á¹¹ÌåÖ¸Õë
+ * @param  buffer: ÓÃ»§Ìá¹©µÄ float Êı×é
+ * @param  capacity: »·ĞÎ»º³åÇøÈİÁ¿£¬×î´óÎª FILTER_MAX_WINDOW_SIZE
+ * @retval 1 ³õÊ¼»¯³É¹¦£¬0 ³õÊ¼»¯Ê§°Ü
  */
 int8 filter_ring_init(filter_ring_t *ring, float *buffer, uint32 capacity)
 {
@@ -104,12 +104,12 @@ int8 filter_ring_init(filter_ring_t *ring, float *buffer, uint32 capacity)
 }
 
 /**
- * @brief  å‘ç¯å½¢ç¼“å†²åŒºå†™å…¥ä¸€ä¸ªæ•°æ®
- * @param  ring: ç¯å½¢ç¼“å†²åŒºç»“æ„ä½“æŒ‡é’ˆ
- * @param  value: å¾…å†™å…¥çš„æ•°æ®
- * @retval 1 å†™å…¥æˆåŠŸï¼Œ0 å†™å…¥å¤±è´¥
- * @note   ç¼“å†²åŒºå·²æ»¡æ—¶è‡ªåŠ¨è¦†ç›–æœ€æ—©å†™å…¥çš„æ•°æ®
- * @note   éä¸­æ–­å®‰å…¨ï¼Œå¹¶å‘å†™å…¥åŒä¸€ ring éœ€è‡ªè¡ŒåŠ é”
+ * @brief  Ïò»·ĞÎ»º³åÇøĞ´ÈëÒ»¸öÊı¾İ
+ * @param  ring: »·ĞÎ»º³åÇø½á¹¹ÌåÖ¸Õë
+ * @param  value: ´ıĞ´ÈëµÄÊı¾İ
+ * @retval 1 Ğ´Èë³É¹¦£¬0 Ğ´ÈëÊ§°Ü
+ * @note   »º³åÇøÒÑÂúÊ±×Ô¶¯¸²¸Ç×îÔçĞ´ÈëµÄÊı¾İ
+ * @note   ·ÇÖĞ¶Ï°²È«£¬²¢·¢Ğ´ÈëÍ¬Ò» ring Ğè×ÔĞĞ¼ÓËø
  */
 int8 filter_ring_write(filter_ring_t *ring, float value)
 {
@@ -130,9 +130,9 @@ int8 filter_ring_write(filter_ring_t *ring, float value)
 }
 
 /**
- * @brief  è·å–ç¯å½¢ç¼“å†²åŒºå½“å‰æ•°æ®æ•°é‡
- * @param  ring: ç¯å½¢ç¼“å†²åŒºç»“æ„ä½“æŒ‡é’ˆ
- * @retval å½“å‰æ•°æ®æ•°é‡
+ * @brief  »ñÈ¡»·ĞÎ»º³åÇøµ±Ç°Êı¾İÊıÁ¿
+ * @param  ring: »·ĞÎ»º³åÇø½á¹¹ÌåÖ¸Õë
+ * @retval µ±Ç°Êı¾İÊıÁ¿
  */
 uint32 filter_ring_size(filter_ring_t *ring)
 {
@@ -141,11 +141,11 @@ uint32 filter_ring_size(filter_ring_t *ring)
 }
 
 /**
- * @brief  æŒ‰æ—¶é—´å…ˆåé¡ºåºå¤åˆ¶ç¯å½¢ç¼“å†²åŒºæ•°æ®
- * @param  ring: ç¯å½¢ç¼“å†²åŒºç»“æ„ä½“æŒ‡é’ˆ
- * @param  output: æ•°æ®è¾“å‡ºæ•°ç»„
- * @param  output_size: è¾“å‡ºæ•°ç»„å®¹é‡
- * @retval 1 å¤åˆ¶æˆåŠŸï¼Œ0 å¤åˆ¶å¤±è´¥
+ * @brief  °´Ê±¼äÏÈºóË³Ğò¸´ÖÆ»·ĞÎ»º³åÇøÊı¾İ
+ * @param  ring: »·ĞÎ»º³åÇø½á¹¹ÌåÖ¸Õë
+ * @param  output: Êı¾İÊä³öÊı×é
+ * @param  output_size: Êä³öÊı×éÈİÁ¿
+ * @retval 1 ¸´ÖÆ³É¹¦£¬0 ¸´ÖÆÊ§°Ü
  */
 int8 filter_ring_copy(filter_ring_t *ring, float *output, uint32 output_size)
 {
@@ -172,12 +172,12 @@ int8 filter_ring_copy(filter_ring_t *ring, float *output, uint32 output_size)
     return 1;
 }
 
-/* ========================= å¸¸ç”¨æ»¤æ³¢ç®—æ³•å®ç° ========================= */
+/* ========================= ³£ÓÃÂË²¨Ëã·¨ÊµÏÖ ========================= */
 
 /**
- * @brief  è®¡ç®—ç¯å½¢ç¼“å†²åŒºæ•°æ®çš„ä¸­å€¼
- * @param  ring: ç¯å½¢ç¼“å†²åŒºç»“æ„ä½“æŒ‡é’ˆ
- * @retval ä¸­å€¼ï¼Œç¼“å†²åŒºä¸ºç©ºæˆ–å¼‚å¸¸æ—¶è¿”å› 0
+ * @brief  ¼ÆËã»·ĞÎ»º³åÇøÊı¾İµÄÖĞÖµ
+ * @param  ring: »·ĞÎ»º³åÇø½á¹¹ÌåÖ¸Õë
+ * @retval ÖĞÖµ£¬»º³åÇøÎª¿Õ»òÒì³£Ê±·µ»Ø 0
  */
 float filter_median(filter_ring_t *ring)
 {
@@ -196,9 +196,9 @@ float filter_median(filter_ring_t *ring)
 }
 
 /**
- * @brief  è®¡ç®—ç¯å½¢ç¼“å†²åŒºæ•°æ®çš„æ»‘åŠ¨å‡å€¼
- * @param  ring: ç¯å½¢ç¼“å†²åŒºç»“æ„ä½“æŒ‡é’ˆ
- * @retval å‡å€¼ï¼Œç¼“å†²åŒºä¸ºç©ºæˆ–å¼‚å¸¸æ—¶è¿”å› 0
+ * @brief  ¼ÆËã»·ĞÎ»º³åÇøÊı¾İµÄ»¬¶¯¾ùÖµ
+ * @param  ring: »·ĞÎ»º³åÇø½á¹¹ÌåÖ¸Õë
+ * @retval ¾ùÖµ£¬»º³åÇøÎª¿Õ»òÒì³£Ê±·µ»Ø 0
  */
 float filter_moving_average(filter_ring_t *ring)
 {
@@ -218,11 +218,11 @@ float filter_moving_average(filter_ring_t *ring)
 }
 
 /**
- * @brief  æ‰§è¡Œä¸€æ¬¡ RC ä½é€šæ»¤æ³¢
- * @param  state: RC æ»¤æ³¢å™¨çŠ¶æ€æŒ‡é’ˆ
- * @param  input: å½“å‰è¾“å…¥æ•°æ®
- * @param  alpha: æ»¤æ³¢ç³»æ•°ï¼ŒèŒƒå›´ä¸º 0 åˆ° 1
- * @retval å½“å‰ä½é€šæ»¤æ³¢è¾“å‡º
+ * @brief  Ö´ĞĞÒ»´Î RC µÍÍ¨ÂË²¨
+ * @param  state: RC ÂË²¨Æ÷×´Ì¬Ö¸Õë
+ * @param  input: µ±Ç°ÊäÈëÊı¾İ
+ * @param  alpha: ÂË²¨ÏµÊı£¬·¶Î§Îª 0 µ½ 1
+ * @retval µ±Ç°µÍÍ¨ÂË²¨Êä³ö
  */
 float filter_rc_low_pass(filter_rc_state_t *state, float input, float alpha)
 {
@@ -242,11 +242,11 @@ float filter_rc_low_pass(filter_rc_state_t *state, float input, float alpha)
 }
 
 /**
- * @brief  æ‰§è¡Œä¸€æ¬¡ RC é«˜é€šæ»¤æ³¢
- * @param  state: RC æ»¤æ³¢å™¨çŠ¶æ€æŒ‡é’ˆ
- * @param  input: å½“å‰è¾“å…¥æ•°æ®
- * @param  alpha: æ»¤æ³¢ç³»æ•°ï¼ŒèŒƒå›´ä¸º 0 åˆ° 1
- * @retval å½“å‰é«˜é€šæ»¤æ³¢è¾“å‡º
+ * @brief  Ö´ĞĞÒ»´Î RC ¸ßÍ¨ÂË²¨
+ * @param  state: RC ÂË²¨Æ÷×´Ì¬Ö¸Õë
+ * @param  input: µ±Ç°ÊäÈëÊı¾İ
+ * @param  alpha: ÂË²¨ÏµÊı£¬·¶Î§Îª 0 µ½ 1
+ * @retval µ±Ç°¸ßÍ¨ÂË²¨Êä³ö
  */
 float filter_rc_high_pass(filter_rc_state_t *state, float input, float alpha)
 {
@@ -268,12 +268,12 @@ float filter_rc_high_pass(filter_rc_state_t *state, float input, float alpha)
 }
 
 /**
- * @brief  æ‰§è¡Œä¸€æ¬¡ RC å¸¦é€šæ»¤æ³¢
- * @param  state: RC æ»¤æ³¢å™¨çŠ¶æ€æŒ‡é’ˆ
- * @param  input: å½“å‰è¾“å…¥æ•°æ®
- * @param  high_pass_alpha: é«˜é€šæ»¤æ³¢ç³»æ•°ï¼ŒèŒƒå›´ä¸º 0 åˆ° 1
- * @param  low_pass_alpha: ä½é€šæ»¤æ³¢ç³»æ•°ï¼ŒèŒƒå›´ä¸º 0 åˆ° 1
- * @retval å½“å‰å¸¦é€šæ»¤æ³¢è¾“å‡º
+ * @brief  Ö´ĞĞÒ»´Î RC ´øÍ¨ÂË²¨
+ * @param  state: RC ÂË²¨Æ÷×´Ì¬Ö¸Õë
+ * @param  input: µ±Ç°ÊäÈëÊı¾İ
+ * @param  high_pass_alpha: ¸ßÍ¨ÂË²¨ÏµÊı£¬·¶Î§Îª 0 µ½ 1
+ * @param  low_pass_alpha: µÍÍ¨ÂË²¨ÏµÊı£¬·¶Î§Îª 0 µ½ 1
+ * @retval µ±Ç°´øÍ¨ÂË²¨Êä³ö
  */
 float filter_rc_band_pass(filter_rc_state_t *state, float input,
                           float high_pass_alpha, float low_pass_alpha)
@@ -298,8 +298,8 @@ float filter_rc_band_pass(filter_rc_state_t *state, float input,
 }
 
 /**
- * @brief  é‡ç½® RC æ»¤æ³¢å™¨è¿è¡ŒçŠ¶æ€
- * @param  state: RC æ»¤æ³¢å™¨çŠ¶æ€æŒ‡é’ˆ
+ * @brief  ÖØÖÃ RC ÂË²¨Æ÷ÔËĞĞ×´Ì¬
+ * @param  state: RC ÂË²¨Æ÷×´Ì¬Ö¸Õë
  * @retval None
  */
 void filter_rc_state_reset(filter_rc_state_t *state)
