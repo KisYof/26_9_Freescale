@@ -58,6 +58,18 @@ void draw_tool_process(void)
     ips200_show_string(0, 180, "V:");
     ips200_show_int(40, 180, NormalMidValid, 2);
 
+    // ÷±œﬂ≈–∂œ≤‚ ‘
+    ips200_show_string(0, 200, "Straight:");
+    ips200_show_int(80, 200, ImageFlag.straight_long, 1);
+
+    //  Æ◊÷≈–∂œ≤‚ ‘
+    ips200_show_string(0, 220, "Cross:");
+    ips200_show_int(80, 220, ImageFlag.Cross_Flag, 1);
+
+    // ∞ﬂ¬Ìœﬂ≈–∂œ≤‚ ‘
+    ips200_show_string(0, 240, "Zebra:");
+    ips200_show_int(80, 240, ImageFlag.Zebra_Flag, 1);
+
 }
 
 

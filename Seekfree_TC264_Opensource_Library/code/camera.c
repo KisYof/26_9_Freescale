@@ -5,7 +5,7 @@
  *      Author: 周文烽
  */
 //sobel
-#include "Camera.h"
+#include "camera.h"
 #include "math.h"
 
 #include <stdio.h>
@@ -49,15 +49,101 @@ int NormalMidValue = 0;//当前帧经过近端和远端加权后得到的正常中线位置
 int NormalMidError = 0;//正常中线误差
 uint8 NormalMidValid = 0;//正常中线有效标志
 
-/* 正常中线使用的远端前瞻行 */
-uint8 Prospect_line = 26;
 
-/* Get_AllLine补线逻辑需要 */
-uint8 ExtenRFlag = 0;
-uint8 ExtenLFlag = 0;
-int Cross_Corner_R = 0;
-int Cross_Corner_L = 0;
+/*直道相关变量*/
+uint8 Prospect_line=26;                                         //图像前瞻控制行
 
+/*斑马线相关变量*/
+uint32 Zebra_length=0;                                          //斑马线赛道长度
+uint32 Zebra_num=2500;                                         //斑马线赛道长度阈值
+uint8 Zebra_Bottom_flag=0;                                  //斑马线到一帧图像底部的标志位
+uint8 Zebra_Miss_flag=0;                                    //斑马线从一帧图像消失的标志位
+
+/*十字相关变量*/
+uint8 ExtenLFlag = 0;                                           //左边线是否需要补线的标志变量（十字）
+uint8 ExtenRFlag = 0;                                           //右边线是否需要补线的标志变量（十字）
+int left_difference_num;                                        //十字左边线与标准中线39作差的和（40-20行）
+int right_difference_num;                                       //十字右边线与标准中线39作差的和（40-20行）
+int Cross_Corner_L=0;                                           //十字右底部的拐点
+int Cross_Corner_R=0;                                           //十字左底部的拐点
+static int TFSite = 0,left_FTSite = 0,right_FTSite = 0;         //补线计算斜率的时候需要用的存放行的变量
+static float DetR = 0, DetL = 0;                                //存放补线斜率的变量
+//uint8 ExterMidFlag = 0;
+
+uint8 Buxian_Flag_R=0;
+uint8 Buxian_Flag_L=0;
+
+/*圆环相关变量*/
+uint8 Ring_Help_Flag = 0;                                       //进环辅助标志（开启圆环进程的标志）
+int Right_RingsFlag_Point1_Ysite, Right_RingsFlag_Point2_Ysite; //右圆环判断的两点纵坐标
+int Left_RingsFlag_Point1_Ysite, Left_RingsFlag_Point2_Ysite;   //左圆环判断的两点纵坐标
+int Point_Xsite,Point_Ysite;                                    //拐点横纵坐标
+int Repair_Point_Xsite,Repair_Pont_Ysite;                      //补线点横纵坐标
+int Point_Ysite1;                                               //判断大小圆环时用的纵坐标
+int Black;                                                      //判断大小圆环时用的黑点数量
+int Less_Big_Small_Num;                                         //判断大小圆环时用的丢线
+uint16 circle_num=0;                                            //判断圆环大小的计数器
+uint16 position=37;//正15 反38                                   //大环判断的阈值
+float Big_Small_Help_Gradient;                                  //大小圆环的辅助判断斜率
+int Small_Rings_HalfWide_Offset=-20;                            //小环半宽偏移
+int right_ring_num=0;
+int left_ring_num=0;
+
+uint8 Half_Road_Wide[LCDH] =                                    //直道赛道半宽
+{
+
+        12,13,14,14,15,15,16,17,18,19,
+        19,20,20,21,21,22,23,23,24,25,
+        25,26,26,27,28,28,29,30,30,31,
+        32,32,33,34,34,35,36,36,37,38,
+        38,39,40,40,41,42,42,43,43,44,
+        45,45,46,46,47,48,48,49,49,50,
+        51,51,52,53,53,54,54,55,56,56
+};
+
+int8 All_Road_Wide[LCDH]=                                      //直道赛道全宽
+{
+        24,26,28,28,30,31,32,34,36,38,
+        39,40,41,42,43,45,46,47,49,50,
+        51,53,53,55,56,57,59,60,61,62,
+        64,65,66,68,68,70,72,72,74,76,
+        76,78,80,80,82,84,84,86,86,88,
+        90,90,92,93,94,96,97,98,99,101,
+        102,103,104,106,107,108,109,110,112,113
+};
+uint8 Half_Bend_Wide[LCDH] =                                    //弯道赛道半宽32  53//25个0
+{
+    32, 32, 32, 32, 32, 32, 32, 32, 32, 32,
+    32, 32, 32, 32, 32, 32, 31, 30, 30, 30,
+    29, 30, 30, 30, 29, 29, 29, 29,30, 30,
+    30, 30, 30, 30, 30, 30, 31, 31, 31, 31,
+    31, 31, 31, 32, 33, 33, 33, 34, 34, 34,
+    34, 35, 36, 36, 36, 36, 37, 37, 38, 38,
+};
+
+//圆环半宽
+uint8 Half_Ring_Wide[LCDH] =//50行有半宽值
+{
+        20,20,20,20,20,20,20,20,20,20,
+        7,13,16,18,20,22,23,25,26,27,
+        28,29,30,31,32,32,33,34,35,36,
+        36,37,38,38,39,39,40,41,41,42,
+        42,43,43,44,44,45,45,46,46,47,
+        47,48,48,49,49,50,50,50,51,51,
+        52,52,53,53,53,54,54,54,55,55
+};
+
+//小圆环半宽
+uint8 Half_Ring_Wide_small[LCDH]=
+{
+        20,20,20,20,20,20,20,20,20,20,
+        20,20,20,20,20,20,20,20,9,14,
+        17,19,21,23,24,26,27,28,29,30,
+        31,32,33,34,35,36,36,37,38,39,
+        39,40,41,41,42,43,43,44,45,45,
+        46,46,47,47,48,48,49,49,50,50,
+        51,51,52,52,53,53,54,54,55,55
+};
 
 
 /*其他*/
@@ -223,7 +309,7 @@ uint8 get_Threshold(uint8* image[][LCDW],uint16 col, uint16 row)
 void Get_BinaryImage(void)
 {
 
-  Threshold = GetOSTU(mt9v03x_image,MT9V03X_H,MT9V03X_W);                           //这里是一个函数调用，通过该函数可以计算出一个效果很不错的二值化阈值。
+  Threshold = GetOSTU(mt9v03x_image,MT9V03X_H,MT9V03X_W);  //这里是一个函数调用，通过该函数可以计算出一个效果很不错的二值化阈值。
   uint8 i, j = 0;
   int line_dif=-2;
 //  if(ImageFlag.Cross_Flag==0)
@@ -232,7 +318,7 @@ void Get_BinaryImage(void)
       {
         for (j = 0; j <LCDW; j++)                              //遍历二维数组的每一列
         {
-          if (mt9v03x_image[i+Cut_high_top][j+Cut_width_half+line_dif] > (Threshold-light_add))                     //如果这个点的灰度值大于阈值Threshold
+          if (mt9v03x_image[i+Cut_high_top][j+Cut_width_half+line_dif] > Threshold)                     //如果这个点的灰度值大于阈值Threshold - lightadd(光线补偿)
               Pixle[i][j] = 255;                                //那么这个像素点就记为白点
           else                                                  //如果这个点的灰度值小于阈值Threshold
               Pixle[i][j] = 0;                                  //那么这个像素点就记为黑点
@@ -956,15 +1042,771 @@ void NormalMid_Update(void)
         NormalMidValid = 0;
     }
 }
+
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
-//  @name           Image_Process
+//  @name           Search_Bottom_Line_OTSU
+//  @brief          获取底层左右边线
+//  @param          imageInput[IMAGE_ROW][IMAGE_COL]        传入的图像数组
+//  @param          Row                                     图像的Ysite
+//  @param          Col                                     图像的Xsite
+//  @return         Bottonline                              底边行选择
+//  @time
+//  @Author
+//  Sample usage:   Search_Bottom_Line_OTSU(imageInput, Row, Col, Bottonline);
+//--------------------------------------------------------------------------------------------------------------------------------------------
+
+void Search_Bottom_Line_OTSU(uint8 imageInput[LCDH][LCDW], uint8 Row, uint8 Col, uint8 Bottonline)
+{//Search_Border_OTSU(Pixle,LCDH,LCDW,LCDH-2);
+
+    //寻找左边边界
+    for (int Xsite = Col / 2-2; Xsite > 0; Xsite--)
+    {
+        if (imageInput[Bottonline][Xsite] == 255 && imageInput[Bottonline][Xsite - 1] == 0)
+        {
+            ImageDeal[Bottonline].LeftBoundary = Xsite;//获取底边左边线
+            break;
+        }
+    }
+    for (int Xsite = Col / 2+2; Xsite < LCDW-1; Xsite++)
+    {
+        if (imageInput[Bottonline][Xsite] == 255 && imageInput[Bottonline][Xsite + 1] == 0)
+        {
+            ImageDeal[Bottonline].RightBoundary = Xsite;//获取底边右边线
+            break;
+        }
+    }
+    ImageFlag.Search_error_flag=0;
+    if(ImageDeal[Bottonline].RightBoundary-ImageDeal[Bottonline].LeftBoundary<40)//说明斑马线在图像底部了
+    {
+        ImageFlag.Search_error_flag=1;
+    }
+
+}
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------
+//  @name           Search_Left_and_Right_Lines
+//  @brief          通过sobel提取左右边线
+//  @param          imageInput[IMAGE_ROW][IMAGE_COL]        传入的图像数组
+//  @param          Row                                     图像的Ysite
+//  @param          Col                                     图像的Xsite
+//  @param          Bottonline                              底边行选择
+//  @return         无
+//  @time
+//  @Author
+//  Sample usage:   Search_Left_and_Right_Lines(imageInput, Row, Col, Bottonline);
+//--------------------------------------------------------------------------------------------------------------------------------------------
+
+void Search_Left_and_Right_Lines(uint8 imageInput[LCDH][LCDW], uint8 Row, uint8 Col, uint8 Bottonline)
+{
+    //定义小人的当前行走状态位置为 上 左 下 右 一次要求 上：左边为黑色 左：上边为褐色 下：右边为色  右：下面有黑色
+/*  前进方向定义：
+                *   0
+                * 3   1
+                *   2
+*/
+/*寻左线坐标规则*/
+    int Left_Rule[2][8] = {
+                                  {0,-1,1,0,0,1,-1,0 },//{0,-1},{1,0},{0,1},{-1,0},  (x,y )
+                                  {-1,-1,1,-1,1,1,-1,1} //{-1,-1},{1,-1},{1,1},{-1,1}
+    };
+    /*寻右线坐标规则*/
+    int Right_Rule[2][8] = {
+                              {0,-1,1,0,0,1,-1,0 },//{0,-1},{1,0},{0,1},{-1,0},
+                              {1,-1,1,1,-1,1,-1,-1} //{1,-1},{1,1},{-1,1},{-1,-1}
+    };
+      int num=0;
+    int16_t Left_Ysite = Bottonline;
+    int16_t Left_Xsite = ImageDeal[Bottonline].LeftBoundary;
+    int16_t Left_Rirection = 0;//左边方向
+    int16_t Pixel_Left_Ysite = Bottonline;
+    int16_t Pixel_Left_Xsite = 0;
+
+    int16_t Right_Ysite = Bottonline;
+    int16_t Right_Xsite = ImageDeal[Bottonline].RightBoundary;
+    int16_t Right_Rirection = 0;//右边方向
+    int16_t Pixel_Right_Ysite = Bottonline;
+    int16_t Pixel_Right_Xsite = 0;
+
+    uint8 Ysite = Bottonline;
+    ImageStatus.OFFLineBoundary = 5;
+    while (1)
+    {
+            num++;
+            if(num>400)
+            {
+                 ImageStatus.OFFLineBoundary = Ysite;//400次的时候还没扫到截止行就停止扶墙，记录当前的截止行
+                break;
+            }
+        if (Ysite >= Pixel_Left_Ysite && Ysite >= Pixel_Right_Ysite)
+        {
+            if (Ysite < ImageStatus.OFFLineBoundary)
+            {
+                ImageStatus.OFFLineBoundary = Ysite;
+                break;
+            }
+            else
+            {
+                Ysite--;//自减开启扶墙
+            }
+        }
+        /*********左边巡线*******/
+        if ((Pixel_Left_Ysite > Ysite) || Ysite == ImageStatus.OFFLineBoundary)//右边扫线
+        {
+            /*计算前方坐标*/
+            Pixel_Left_Ysite = Left_Ysite + Left_Rule[0][2 * Left_Rirection + 1];
+            Pixel_Left_Xsite = Left_Xsite + Left_Rule[0][2 * Left_Rirection];
+
+            if (imageInput[Pixel_Left_Ysite][Pixel_Left_Xsite] == 0)//前方是黑色
+            {
+                //顺时针旋转90
+                if (Left_Rirection == 3)
+                    Left_Rirection = 0;
+                else
+                    Left_Rirection++;
+            }
+            else//前方是白色
+            {
+                /*计算左前方坐标*/
+                Pixel_Left_Ysite = Left_Ysite + Left_Rule[1][2 * Left_Rirection + 1];
+                Pixel_Left_Xsite = Left_Xsite + Left_Rule[1][2 * Left_Rirection];
+
+                if (imageInput[Pixel_Left_Ysite][Pixel_Left_Xsite] == 0)//左前方为黑色
+                {
+                    //方向不变  Left_Rirection
+                    Left_Ysite = Left_Ysite + Left_Rule[0][2 * Left_Rirection + 1];
+                    Left_Xsite = Left_Xsite + Left_Rule[0][2 * Left_Rirection];
+                    if (ImageDeal[Left_Ysite].LeftBoundary_First == 0)
+                        ImageDeal[Left_Ysite].LeftBoundary_First = Left_Xsite;
+                    ImageDeal[Left_Ysite].LeftBoundary = Left_Xsite;
+                }
+                else//左前方为白色
+                {
+                    // 方向发生改变 Left_Rirection  逆时针90度
+                    Left_Ysite = Left_Ysite + Left_Rule[1][2 * Left_Rirection + 1];
+                    Left_Xsite = Left_Xsite + Left_Rule[1][2 * Left_Rirection];
+                    if (ImageDeal[Left_Ysite].LeftBoundary_First == 0 )
+                        ImageDeal[Left_Ysite].LeftBoundary_First = Left_Xsite;
+                    ImageDeal[Left_Ysite].LeftBoundary = Left_Xsite;
+                    if (Left_Rirection == 0)
+                        Left_Rirection = 3;
+                    else
+                        Left_Rirection--;
+                }
+
+            }
+        }
+        /*********右边巡线*******/
+        if ((Pixel_Right_Ysite > Ysite) || Ysite == ImageStatus.OFFLineBoundary)//右边扫线
+        {
+            /*计算前方坐标*/
+            Pixel_Right_Ysite = Right_Ysite + Right_Rule[0][2 * Right_Rirection + 1];
+            Pixel_Right_Xsite = Right_Xsite + Right_Rule[0][2 * Right_Rirection];
+
+            if (imageInput[Pixel_Right_Ysite][Pixel_Right_Xsite] == 0)//前方是黑色
+            {
+                //逆时针旋转90
+                if (Right_Rirection == 0)
+                    Right_Rirection = 3;
+                else
+                    Right_Rirection--;
+            }
+            else//前方是白色
+            {
+                /*计算右前方坐标*/
+                Pixel_Right_Ysite = Right_Ysite + Right_Rule[1][2 * Right_Rirection + 1];
+                Pixel_Right_Xsite = Right_Xsite + Right_Rule[1][2 * Right_Rirection];
+
+                if (imageInput[Pixel_Right_Ysite][Pixel_Right_Xsite] == 0)//左前方为黑色
+                {
+                    //方向不变  Right_Rirection
+                    Right_Ysite = Right_Ysite + Right_Rule[0][2 * Right_Rirection + 1];
+                    Right_Xsite = Right_Xsite + Right_Rule[0][2 * Right_Rirection];
+                    if (ImageDeal[Right_Ysite].RightBoundary_First == LCDW-1 )
+                        ImageDeal[Right_Ysite].RightBoundary_First = Right_Xsite;
+                    ImageDeal[Right_Ysite].RightBoundary = Right_Xsite;
+                }
+                else//左前方为白色
+                {
+                    // 方向发生改变 Right_Rirection  逆时针90度
+                    Right_Ysite = Right_Ysite + Right_Rule[1][2 * Right_Rirection + 1];
+                    Right_Xsite = Right_Xsite + Right_Rule[1][2 * Right_Rirection];
+                    if (ImageDeal[Right_Ysite].RightBoundary_First == LCDW-1)
+                        ImageDeal[Right_Ysite].RightBoundary_First = Right_Xsite;
+                    ImageDeal[Right_Ysite].RightBoundary = Right_Xsite;
+                    if (Right_Rirection == 3)
+                        Right_Rirection = 0;
+                    else
+                        Right_Rirection++;
+                }
+
+            }
+        }
+
+        if (abs(Pixel_Right_Xsite - Pixel_Left_Xsite) < 5)//Ysite<80是为了放在底部是斑马线扫描结束  3 && Ysite < 30
+        {
+
+            ImageStatus.OFFLineBoundary = Ysite;
+            break;
+        }
+
+    }
+}
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------
+//  @name           Search_Border_OTSU
+//  @brief          通过OTSU获取边线 和信息
+//  @param          imageInput[IMAGE_ROW][IMAGE_COL]        传入的图像数组
+//  @param          Row                                     图像的Ysite
+//  @param          Col                                     图像的Xsite
+//  @param          Bottonline                              底边行选择
+//  @return         无
+//  @time           2022年10月7日
+//  @Author
+//  Sample usage:   Search_Border_OTSU(mt9v03x_image, IMAGE_ROW, IMAGE_COL, IMAGE_ROW-8);
+//--------------------------------------------------------------------------------------------------------------------------------------------
+
+void Search_Border_OTSU(uint8 imageInput[LCDH][LCDW], uint8 Row, uint8 Col, uint8 Bottonline)
+{//Search_Border_OTSU(Pixle,LCDH,LCDW,LCDH-2);
+    ImageStatus.WhiteLine_L = 0;
+    ImageStatus.WhiteLine_R = 0;
+    //ImageStatus.OFFLine = 1;
+    /*封上下边界处理*/
+    for (int Xsite = 0; Xsite < LCDW; Xsite++)
+    {
+        imageInput[0][Xsite] = 0;
+        imageInput[Bottonline + 1][Xsite] = 0;
+    }
+    /*封左右边界处理*/
+    for (int Ysite = 0; Ysite < LCDH; Ysite++)
+    {
+            ImageDeal[Ysite].LeftBoundary_First = 0;
+            ImageDeal[Ysite].RightBoundary_First = LCDW-1;
+
+            imageInput[Ysite][0] = 0;
+            imageInput[Ysite][LCDW - 1] = 0;
+    }
+    /********获取底部边线*********/
+    Search_Bottom_Line_OTSU(imageInput, Row, Col, Bottonline);
+    /********获取左右边线*********/
+    Search_Left_and_Right_Lines(imageInput, Row, Col, Bottonline);
+
+
+
+    for (int Ysite = Bottonline; Ysite > ImageStatus.OFFLineBoundary + 1; Ysite--)
+    {
+        if (ImageDeal[Ysite].LeftBoundary < 3)
+        {
+            ImageStatus.WhiteLine_L++;
+        }
+        if (ImageDeal[Ysite].RightBoundary > LCDW - 3)
+        {
+            ImageStatus.WhiteLine_R++;
+        }
+    }
+}
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------
+//  @name           Get_ExtensionLine
+//  @brief          这个函数的作用就是补线！
+//  @brief          十字路口那里，按理来说车得直行对吧，但是这种情况摄像头扫线的时候，是不是会出现扫不到边线的情况？因为那几行都是白色的嘛，找不到黑白跳变点。
+//  @brief          所以按照上面的搜边线算法，如果我们不对这种情况做算法处理的话，那我那些行的左右边界是不是就不对了？对应的中线是不是也不对了？那你能保证小车还直行嘛？
+//  @brief          显然保证不了，所以这个时候小车可能就会根据算出来的中线，直接左转或者右转了，是不是违背比赛规则了，那是不是就寄了？所以说补线是非常重要的一环。
+//  @parameter      void
+//  @time           2023年2月21日
+//  @Author
+//  Sample usage:   Get_ExtensionLine();
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------
+void Get_ExtensionLine(void)
+{
+    //ImageStatus.OFFLine=5;                                                  //这个结构体成员我之所以在这里赋值，是因为我ImageStatus结构体里面的成员太多了，但是暂时又只用到了OFFLine，所以我在哪用到它就在哪赋值。
+    /************************************左边线的补线处理*************************************************/
+//    if (ImageStatus.WhiteLine >= 8)   //可给严苛一点                            //如果丢边行的数量大于8
+    TFSite = LCDH-5;                                                          //那就给TFSite赋值为55，这个变量是待会算补线斜率的一个变量。
+    left_FTSite=0;
+    right_FTSite=0;
+//    ImageFlag.Cross_Flag=0;
+
+    if (ExtenLFlag != 'F')
+        for (Ysite = LCDH-10; Ysite >= (ImageStatus.OFFLine + 4);Ysite--)       //从第54开始往上扫，一直扫到顶边下面几行。
+        {
+            PicTemp = Pixle[Ysite];
+            if (ImageDeal[Ysite].IsLeftFind =='W'&&Ysite<60)                             //如果本行的左边线类型是W类型，也就是无边行类型。
+            {
+                if (ImageDeal[Ysite + 1].LeftBorder >= LCDW-10)                //如果左边界到了第70列右边去了，那大概率就是极端情况，说明已经快寄了。
+                {
+                  ImageStatus.OFFLine = Ysite + 1;                             //这种情况最好的处理方法就是不处理，直接跳出循环。,记录offline
+                  break;
+                }
+                while (Ysite >= (ImageStatus.OFFLine + 4))                     //如果左边界正常，那就进入while循环卡着，直到满足循环结束条件。
+                {
+                    Ysite--;                                                   //行数减减
+                    if (ImageDeal[Ysite].IsLeftFind == 'T'
+                            &&ImageDeal[Ysite - 1].IsLeftFind == 'T'
+                         &&ImageDeal[Ysite - 2].IsLeftFind == 'T'
+
+                      /*&&ImageDeal[Ysite - 2].LeftBorder > 0
+                      &&ImageDeal[Ysite - 2].LeftBorder <LCDW-10*/
+                      )                                                        //如果扫到的无边行的上面连续三行都是正常边线
+                    {
+                      left_FTSite = Ysite - 5; //3给大点会增加对锯齿拐角的抵抗力         //那就把扫到的这一行的上面两行存入FTsite变量
+//                      if(Buxian_Flag_L)
+//                      {
+//                          left_FTSite=Ysite;//找十字左上拐点
+//                      }
+                      break;                                                   //跳出while循环
+                    }
+                }
+                if(ImageDeal[Cross_Corner_L].LeftBorder<0)
+                    ImageDeal[Cross_Corner_L].LeftBorder=0;
+               DetL =((float)(ImageDeal[left_FTSite].LeftBorder -ImageDeal[Cross_Corner_L].LeftBorder)) /((float)(left_FTSite - Cross_Corner_L));  //计算左边线的补线斜率
+               if (left_FTSite > ImageStatus.OFFLine+5)                        //如果FTSite存储的那一行在图像顶边OFFline的下面
+               {
+                   for (ytemp = Cross_Corner_L; ytemp >= left_FTSite; ytemp--)//那么我就从第一次扫到的左边界的下面第二行的位置开始往上一直补线，补到FTSite行。
+                   {
+                   ImageDeal[ytemp].LeftBorder =(int)(DetL * ((float)(ytemp - Cross_Corner_L))) +ImageDeal[Cross_Corner_L].LeftBorder;//这里就是具体的补线操作了
+                   }
+                       Ysite=(ImageStatus.OFFLine + 4)-1;                        //减一停止外层的循环，因为有可能遇到双十字，以底部十字补线一次即可
+               }
+            }                                         //这里为什么要Ysite+2，我没法在注释里面讲清楚，自己领会吧。//应该就是在找到无边行的下两行来计算斜率
+        }
+    /************************************左边线的补线处理*************************************************/
+//    wireless_uart_send_byte(0x00);
+
+    /************************************右边线的补线处理（跟左边线处理思路一模一样）注释略*************************************************/
+    if (ExtenRFlag != 'F')
+        for (Ysite = LCDH-10; Ysite >= (ImageStatus.OFFLine + 4);Ysite--)
+        {
+          PicTemp = Pixle[Ysite];//存当前行
+          if (ImageDeal[Ysite].IsRightFind =='W'&&Ysite<60)
+          {
+            if (ImageDeal[Ysite + 1].RightBorder <= 10)
+            {
+              ImageStatus.OFFLine =Ysite + 1;
+              break;
+            }
+            while (Ysite >= (ImageStatus.OFFLine + 4))
+            {
+              Ysite--;
+              if (ImageDeal[Ysite].IsRightFind == 'T'
+                  &&ImageDeal[Ysite - 1].IsRightFind == 'T'
+                  &&ImageDeal[Ysite - 2].IsRightFind == 'T'
+                  /*&&ImageDeal[Ysite - 2].RightBorder < LCDW-1
+                  &&ImageDeal[Ysite - 2].RightBorder > 10*/
+                  )
+              {
+                  right_FTSite = Ysite - 5;
+//                  if(Buxian_Flag_R==1)
+//                  {
+//                      right_FTSite=Ysite;
+//                  }
+                break;
+              }
+            }
+            if(ImageDeal[Cross_Corner_R].RightBorder>LCDW-1)
+                ImageDeal[Cross_Corner_R].RightBorder=LCDW-1;
+           DetR =((float)(ImageDeal[right_FTSite].RightBorder -ImageDeal[Cross_Corner_R].RightBorder)) /((float)(right_FTSite - Cross_Corner_R));
+           if (right_FTSite > ImageStatus.OFFLine+5)
+           {
+                 for (ytemp = Cross_Corner_R; ytemp >= right_FTSite;ytemp--)
+                 {
+                   ImageDeal[ytemp].RightBorder =(int)(DetR * ((float)(ytemp - Cross_Corner_R))) +ImageDeal[Cross_Corner_R].RightBorder;
+                 }
+                 Ysite=(ImageStatus.OFFLine + 4)-1;                        //减一停止外层的循环，因为有可能遇到双十字，以底部十字补线一次即可
+           }
+          }
+        }
+      /************************************右边线的补线处理（跟左边线处理思路一模一样）注释略*************************************************/
+
+
+   /*****************************************所有的补线处理结束，把中线和赛道宽度信息再更新一遍******************************************************/
+        if(left_FTSite != 0 && right_FTSite != 0)
+        {
+            for (Ysite = LCDH-1; Ysite >= ImageStatus.OFFLine; Ysite--)
+            {
+                ImageDeal[Ysite].Center =(ImageDeal[Ysite].LeftBorder+ImageDeal[Ysite].RightBorder)/2;
+                ImageDeal[Ysite].Wide =ImageDeal[Ysite].RightBorder-ImageDeal[Ysite].LeftBorder ;
+
+            }
+
+        }
+
+        if((right_FTSite-left_FTSite) > 5)
+        {
+//            BeeOn;
+            for (Ysite = LCDH-1; Ysite >= ImageStatus.OFFLine; Ysite--)
+            {
+                ImageDeal[Ysite].Center =ImageDeal[Ysite].RightBorder - Half_Road_Wide[Ysite];
+            }
+        }
+        if((left_FTSite-right_FTSite) > 5)
+        {
+            for (Ysite = LCDH-1; Ysite >= ImageStatus.OFFLine; Ysite--)
+            {
+                ImageDeal[Ysite].Center =ImageDeal[Ysite].LeftBorder + Half_Road_Wide[Ysite];
+            }
+        }
+
+//    ImageFlag.Cross_Flag=0;
+//    BeeOff;
+//    /*****************************************所有的补线处理结束，把中线和赛道宽度信息再更新一遍******************************************************/
+}
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------
+//  @name           Straight_Judge
+//  @brief          *****************直线判断******************
+//  @parameter
+//  @note           //在[start, end]这些行里，把某一组边线点拟合成一条直线，然后计算实际边线点和这条理想直线的偏差。
+//  @note           返回值越小，越接近直线
+//  @note           可以用于直道、弯道、环岛入口等判断
+//  @time
+//  @Author
+//  Sample usage:   Straight_Judge
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+float Straight_Judge(uint8 dir, uint8 start, uint8 end)         //返回实际边界与拟合直线的方差和
+//在[start, end]这些行里，把某一组边线点拟合成一条直线，然后计算实际边线点和这条理想直线的偏差。
+//返回值越小，越接近直线
+//可以用于直道、弯道、环岛入口等判断
+{
+    int i;
+    float S = 0, Sum = 0, Err = 0, k = 0;//每往下一行，边线理论上应该移动多少像素 也就是理想直线的斜率。
+    switch (dir)//1：左边界 LeftBorder 2：右边界 RightBorder 3：中线 Center
+    {
+    case 1:k = (float)(ImageDeal[start].LeftBorder - ImageDeal[end].LeftBorder) / (start - end);
+        for (i = 0; i < end - start; i++)//计算每行的误差平方和
+        {
+            Err = (ImageDeal[start].LeftBorder + k * i - ImageDeal[i + start].LeftBorder) * (ImageDeal[start].LeftBorder + k * i - ImageDeal[i + start].LeftBorder);
+            Sum += Err;//正常情况下，Sum应该比较小
+        }
+        S = Sum / (end - start);//所有行误差平方的平均值
+        break;
+    case 2:k = (float)(ImageDeal[start].RightBorder - ImageDeal[end].RightBorder) / (start - end);
+        for (i = 0; i < end - start; i++)
+        {
+            Err = (ImageDeal[start].RightBorder + k * i - ImageDeal[i + start].RightBorder) * (ImageDeal[start].RightBorder + k * i - ImageDeal[i + start].RightBorder);
+            Sum += Err;
+        }
+        S = Sum / (end - start);
+        break;
+    case 3:k = (float)(ImageDeal[start].Center - ImageDeal[end].Center) / (start - end);
+        for (i = 0; i < end - start; i++)
+        {
+            Err = (ImageDeal[start].Center + k * i - ImageDeal[i + start].Center) * (ImageDeal[start].Center + k * i - ImageDeal[i + start].Center);
+            Sum += Err;
+        }
+        S = Sum / (end - start);
+        break;
+    }
+    return S;
+}
+
+
+uint8 NO_zhidao_add_flag=0;//作用：暂时禁止长直道判断 触发：斑马线阶段
+
+
+/***************长直线判断*******************/
+void Straight_long_judge(void)                                  //返回结果小于3即为直线
+{
+    if((ImageFlag.Zebra_Counter==1&&ImageFlag.Zebra_Flag==1)||NO_zhidao_add_flag==1)
+        return;
+ //左右边线误差均小于5 -> 直道判断成立
+    if((Straight_Judge(1,ImageStatus.OFFLine+2,65) < 5) && (Straight_Judge(2,ImageStatus.OFFLine+2,65) < 5)
+            && ImageStatus.OFFLine < 8 && ImageStatus.Miss_Left_lines < 2 && ImageStatus.Miss_Right_lines < 2)
+    {
+        ImageFlag.straight_long = 1;
+    }
+
+}
+/***************长直线处理*******************/
+void Straight_long_handle(void)                                  //返回结果小于1即为直线
+{
+
+    if(ImageFlag.straight_long)
+    {
+        if(
+                (Straight_Judge(1,ImageStatus.OFFLine+2,65) >= 5)
+            || (Straight_Judge(2,ImageStatus.OFFLine+2,65) >= 5)
+//            || ImageStatus.OFFLine >= 15
+            ||ImageStatus.WhiteLine_L>=3
+            ||ImageStatus.WhiteLine_R>=3)
+        {
+            ImageFlag.straight_long = 0;
+            BeeOff;
+            //左边线不直了或右边线不直了或一侧出现明显丢线    → 不再是长直道   → 关闭蜂鸣器
+        }
+    }
+}
+
+//用于变参数的直道检测  也就是用中线来判断直道 放在十字处理后进行判断
+float sum1=0,sum2=0;
+
+uint8 Bai_point_num=0;//当前这一列统计到的白点数量
+uint8 Bai_point_max_num=0;//所有扫描列中，白点数量最多的那一列
+uint8 LongestLine_Found_flag=0;//是否找到长白列的标志位
+
+//长直道判断  图像中间是否存在一整列很长的白色区域 标志：LongestLine_Found_flag
+void LongestLine_Judge(void)
+{
+    //如果是环岛阶段，就不判断长直道
+    if(ImageFlag.image_element_rings_flag!=0)
+    {
+        LongestLine_Found_flag=0;
+        return;
+    }
+
+//    for(uint8 Xsite=20;Xsite<106;Xsite++)
+    for(uint8 Xsite=40;Xsite<120;Xsite++)
+      {
+        if(Pixle[68][Xsite]==0)
+            {continue;}
+          Bai_point_num=0;
+          for(uint8 Ysite=69;Ysite>0;Ysite--)
+          {
+              if(Pixle[Ysite][Xsite]==255)
+              {
+                  Bai_point_num++;
+              }
+              else if(Pixle[Ysite][Xsite]==255&&Pixle[Ysite-1][Xsite]==0)
+              {
+                  break;
+              }
+              else if(Ysite==1)
+              {
+                  break;
+              }
+          }
+          if(Bai_point_num>Bai_point_max_num)
+          {
+              Bai_point_max_num=Bai_point_num;
+          }
+          if(Bai_point_max_num>67||(ImageStatus.OFFLine<6&&ImageStatus.Det_True<20))
+          {
+              Bai_point_max_num=0;
+              LongestLine_Found_flag=1;
+              break;
+          }
+          if(LongestLine_Found_flag)
+          {
+              if(ImageStatus.OFFLine>10)
+                  LongestLine_Found_flag=0;
+          }
+//          else
+//              LongestLine_Found_flag=0;
+      }
+}
+
+//长直道处理 持续确认长白列 如果白列消失了，就取消标志
+void LongestLind_Handle(void)
+{
+    if(LongestLine_Found_flag==1)
+    {
+        for(uint8 Xsite=20;Xsite<140;Xsite++)
+          {
+            if(Pixle[68][Xsite]==0)
+                {continue;}
+              Bai_point_num=0;
+              for(uint8 Ysite=69;Ysite>0;Ysite--)
+              {
+                  if(Pixle[Ysite][Xsite]==255)
+                  {
+                      Bai_point_num++;
+                  }
+                  else if(Pixle[Ysite][Xsite]==255&&Pixle[Ysite-1][Xsite]==0)
+                  {
+                      break;
+                  }
+                  else if(Ysite==1)
+                  {
+                      break;
+                  }
+              }
+              if(Bai_point_num>Bai_point_max_num)
+              {
+                  Bai_point_max_num=Bai_point_num;
+              }
+          }
+        if(Bai_point_max_num<=67||ImageFlag.image_element_rings_flag!=0)
+        {
+            LongestLine_Found_flag=0;
+        }
+    }
+}
+
+//--------------------------------------------------------------
+//  @name          Element_Judgment_Zebra()
+//  @brief         //斑马线判断 通过扫描黑白跳变次数
+//  @parameter      void
+//  @note         ImageFlag.Zebra_Flag 当前是否处于斑马线状态
+//  @note         ImageFlag.Zebra_Counter 斑马线计数器，记录斑马线出现的次数
+//  @note         Zebra_Bottom_flag 斑马线是否到达图像底部
+//  @note         Zebra_Miss_flag 斑马线是否消失
+//  @time
+//  @Author
+//  Sample usage:
+//--------------------------------------------------------------
+void Element_Judgment_Zebra()
+{
+    if (ImageFlag.Zebra_Flag)
+        return;
+
+    int NUM = 0, net = 0;
+    if(ImageStatus.OFFLineBoundary<20)
+    {
+        for (int Ysite = 69; Ysite >29; Ysite--)
+        {
+            net = 0;
+            for (int Xsite =ImageDeal[Ysite].LeftBoundary ; Xsite < ImageDeal[Ysite].RightBoundary-1; Xsite++)
+            {
+                if ((Pixle[Ysite][Xsite] == 0 && Pixle[Ysite][Xsite + 1] == 255)||(Pixle[Ysite][Xsite] == 255 && Pixle[Ysite][Xsite + 1] == 0))
+                {
+                    net++;
+                    if (net > 8)
+                    {
+                        NUM++;
+                    }
+                }
+            }
+        }
+    }
+
+    if (NUM >= 3 && ImageFlag.Zebra_Flag == 0)
+    {
+        ImageFlag.Zebra_Flag = 1;
+        if(ImageFlag.Zebra_Counter==1)
+        {
+            NO_zhidao_add_flag=1;
+        }
+//        BeeOn;
+    }
+}
+
+//斑马线处理 Zwf 2024-2-20
+/****一般ImageFlag.Zebra_Flag = 1时斑马线还在图像中间部分，等ImageFlag.Search_error_flag==1时说明斑马线在图像底部了，这时挂起斑马线到底部的标志位Zebra_Bottom_flag=1
+ ,在Zebra_Bottom_flag=1条件下检测Search_error_flag=0条件成立时，则此次斑马线状态结束*****/
+void Element_Handle_Zebra()
+{
+    if(ImageFlag.Search_error_flag==1)
+    {
+        Search_Border_OTSU(Pixle,LCDH,LCDW,25);             //由于图像底部时斑马线，迷宫找种子没找到,故在图像中间找种子避免生长错误
+        Zebra_Bottom_flag=1;                                //斑马线消失
+//        BeeOn;
+    }
+    if(Zebra_Bottom_flag==1)
+    {
+        uint8 x_R=0;
+        uint8 x_L=0;
+        Zebra_Miss_flag=1;
+        /****这个for是为了确保斑马线消失****/
+        for(int Ysite=68;Ysite>29;Ysite--)//68是因为封边
+        {
+            for (int Xsite = LCDW / 2-2; Xsite > 0; Xsite--)
+            {
+                if (Pixle[Ysite][Xsite] == 255 && Pixle[Ysite][Xsite - 1] == 0)
+                {
+                    x_L = Xsite;//获取底边左边线
+                    break;
+                }
+            }
+            for (int Xsite = LCDW / 2+2; Xsite < LCDW; Xsite++)
+            {
+                if (Pixle[Ysite][Xsite] == 255 && Pixle[Ysite][Xsite + 1] == 0)
+                {
+                    x_R = Xsite;//获取底边右边线
+                    break;
+                }
+            }
+            if(x_R-x_L<40)
+            {
+                Zebra_Miss_flag=0;
+                break;
+            }
+        }
+
+        /**结束斑马线进程**/
+        if(Zebra_Miss_flag==1)
+        {
+            Get_BaseLine();
+            Get_AllLine();
+
+            ImageFlag.Zebra_Flag=0;
+            ImageFlag.Zebra_Counter++;
+            Zebra_Bottom_flag=0;
+//            BeeOff;
+            if(ImageFlag.Zebra_Counter==2)                                                    //第二次识别到斑马线才挂起停车标志位
+            {
+                ImageFlag.Stop=1;
+//                ImageFlag.Zebra_Counter=0;
+            }
+        }
+    }
+}
+
+//--------------------------------------------------------------
+//  @name          Element_Judgement_Cross()
+//  @brief         //元素判断: 十字判断
+//  @parameter      void
+//  @note
+//  @time
+//  @Author
+//  Sample usage:
+//--------------------------------------------------------------
+float Cross_white_line=10;
+
+void Element_Judgement_Cross()
+{
+    //每帧先清标志 默认当前没有十字  左右丢线计数先清零
+    ImageFlag.Cross_Flag=0;
+    ImageStatus.Cross_Miss_Left_lines=0;
+    ImageStatus.Cross_Miss_Right_lines=0;
+
+    //统计左右丢线 从第 40 行开始，一直往上看，统计左/右边线找不到的行数
+    for(int ysite=40;ysite>ImageStatus.OFFLine+1;ysite--)
+    {
+        if(ImageDeal[ysite].IsLeftFind=='W')//这一行左边线搜索异常，或者没有找到左边线
+        {
+            ImageStatus.Cross_Miss_Left_lines++;
+        }
+        if(ImageDeal[ysite].IsRightFind=='W')
+        {
+            ImageStatus.Cross_Miss_Right_lines++;
+        }
+    }
+//    ips200_show_int(50,220,ImageStatus.WhiteLine,4);
+
+    /*其他边界搜索算法发现白色区域或白线数量异常 或者 左边线和右边线同时大面积丢失*/
+    /*并且当前不是环岛 */
+    if((ImageStatus.WhiteLine >= Cross_white_line||(ImageStatus.Cross_Miss_Left_lines>12&&ImageStatus.Cross_Miss_Right_lines>12))&&ImageFlag.image_element_rings==0) //十字处理
+    {
+//        BeeOn;
+        ImageFlag.Cross_Flag=1;
+    }
+//    if(ImageFlag.Cross_Flag==0){
+//        BeeOff;
+//    }
+
+}
+//十字补线函数 根据十字之前的左右边线 用已经知道的斜率延长出丢失的边线 重新生成十字区域的中线
+void Element_Handle_Cross()
+{
+    Get_ExtensionLine();
+}
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------
+//  @name
 //  @brief          整个图像处理的主函数，里面包含了所有的图像处理子函数
 //  @parameter      void
 //  @time           2023年2月19日
 //  @Author
 //  Sample usage:   Image_Process();
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
+void Scan_Element(void)
+{
+    Straight_long_judge();
 
+    Element_Judgment_Zebra();
+
+    Element_Judgement_Cross();
+}
 
 void Image_Process(void)
 {
@@ -984,22 +1826,24 @@ void Image_Process(void)
 
           //计算正常中线
           NormalMid_Update();
-           
+
            //正常中线有效时，控制层使用正常中线误差
            if (NormalMidValid)
             {
                  ImageStatus.Det_True = NormalMidError;
             }
-    
-          
+
+           Search_Border_OTSU(Pixle, LCDH, LCDW, LCDH - 2);
+
+           //元素判断
+           Scan_Element();
+
+
      mt9v03x_finish_flag=0;     //这一帧已经处理完了  可以开始下一帧
 
 
     }
 }
-
-
-
 
 
 
