@@ -10,5 +10,6 @@ void run_motor_right_speed(int16 speed);
 void run_servo_motor_angle(int8 angle);
 void run_direct(int16 speed, int16 gap);
 double run_get_gap(void);
+void run_speed_decision(void);
 
 #endif
