@@ -178,10 +178,10 @@ double run_get_gap(void)
     double gap = 0;
 
     // 这里读取视觉数据，并做出滤波，PD调节输出后轮差速值
-        if (NormalMidValid)
-        {
-            gap = PID_Controller_Calc(&pid_gap, 0, (double)NormalMidError);
-        }
+    if (NormalMidValid && ImageFlag.Zebra_Flag != 1) // 未识别到斑马线时
+    {
+        gap = PID_Controller_Calc(&pid_gap, 0, (double)NormalMidError);
+    }
 
     return gap;
 }
