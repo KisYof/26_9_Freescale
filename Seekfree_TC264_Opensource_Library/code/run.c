@@ -1,6 +1,7 @@
 #include "run.h"
 #include "pid.h"
 #include "filter.h"
+#include "camera.h"
 
 // 电机相关
 #define DIR_R2 (P21_2) // 实际使用的电机组
@@ -172,7 +173,10 @@ double run_get_gap(void)
     double gap = 0;
 
     // 这里读取视觉数据，并做出滤波，PD调节输出后轮差速值
-    //  gap =
+        if (NormalMidValid)
+        {
+            gap = PID_Controller_Calc(&pid_gap, 0, (double)NormalMidError);
+        }
 
     return gap;
 }
@@ -208,6 +212,7 @@ IFX_INTERRUPT(cc60_pit_ch0_isr, 0, CCU6_0_CH0_ISR_PRIORITY)
     pit_clear_flag(CCU60_CH0);
 
     run_direct(speed, (int16)run_get_gap()); // 5ms周期执行一次 run_direct() 函数
+    run_servo_motor_angle((int8)run_get_gap());
 }
 IFX_INTERRUPT(cc60_pit_ch1_isr, 0, CCU6_0_CH1_ISR_PRIORITY)
 {
