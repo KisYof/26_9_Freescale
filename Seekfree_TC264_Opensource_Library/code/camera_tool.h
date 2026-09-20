@@ -10,7 +10,7 @@
 
 #include "zf_common_headfile.h"
 #include "Camera.h"
-#include "Encoder.h"
+
 
 #define RED 0
 #define BLUE 1

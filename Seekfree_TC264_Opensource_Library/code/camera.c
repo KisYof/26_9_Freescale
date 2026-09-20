@@ -223,7 +223,7 @@ uint8 get_Threshold(uint8* image[][LCDW],uint16 col, uint16 row)
 void Get_BinaryImage(void)
 {
 
-  Threshold = GetOSTU(mt9v03x_image,MT9V03X_H,MT9V03X_W);                           //这里是一个函数调用，通过该函数可以计算出一个效果很不错的二值化阈值。
+  Threshold = GetOSTU(mt9v03x_image,MT9V03X_H,MT9V03X_W);  //这里是一个函数调用，通过该函数可以计算出一个效果很不错的二值化阈值。
   uint8 i, j = 0;
   int line_dif=-2;
 //  if(ImageFlag.Cross_Flag==0)
@@ -232,7 +232,7 @@ void Get_BinaryImage(void)
       {
         for (j = 0; j <LCDW; j++)                              //遍历二维数组的每一列
         {
-          if (mt9v03x_image[i+Cut_high_top][j+Cut_width_half+line_dif] > (Threshold-light_add))                     //如果这个点的灰度值大于阈值Threshold
+          if (mt9v03x_image[i+Cut_high_top][j+Cut_width_half+line_dif] > Threshold)                     //如果这个点的灰度值大于阈值Threshold - lightadd(光线补偿)
               Pixle[i][j] = 255;                                //那么这个像素点就记为白点
           else                                                  //如果这个点的灰度值小于阈值Threshold
               Pixle[i][j] = 0;                                  //那么这个像素点就记为黑点

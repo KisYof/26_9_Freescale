@@ -35,45 +35,96 @@
 #include "zf_common_headfile.h"
 #pragma section all "cpu0_dsram"
 
+#include "Camera.h"
+#include "Camera_tool.h"
+
 #include "run.h"
 
 // 将本语句与#pragma section all restore语句之间的全局变量都放在CPU0的RAM中
+// *************************** 例程硬件连接说明 ***************************
+// 接入总钻风灰度数字摄像头 对应主板摄像头接口 请注意线序
+//      模块管脚            单片机管脚
+//      TXD                 查看 zf_device_mt9v03x.h 中 MT9V03X_COF_UART_TX 宏定义
+//      RXD                 查看 zf_device_mt9v03x.h 中 MT9V03X_COF_UART_RX 宏定义
+//      PCLK                查看 zf_device_mt9v03x.h 中 MT9V03X_PCLK_PIN 宏定义
+//      VSY                 查看 zf_device_mt9v03x.h 中 MT9V03X_VSYNC_PIN 宏定义
+//      D0-D7               查看 zf_device_mt9v03x.h 中 MT9V03X_DATA_PIN 宏定义 从该定义开始的连续八个引脚
+//      GND                 核心板电源地 GND
+//      3V3                 核心板 3V3 电源
+// 接入2寸IPS模块
+// *************************** 例程硬件连接说明 ***************************
+//      模块管脚            单片机管脚
+//      BL                  查看 zf_device_ips200_parallel8.h 中 IPS200_BL_PIN 宏定义  默认 P15_3
+//      CS                  查看 zf_device_ips200_parallel8.h 中 IPS200_CS_PIN 宏定义  默认 P15_5
+//      RST                 查看 zf_device_ips200_parallel8.h 中 IPS200_RST_PIN 宏定义 默认 P15_1
+//      RS                  查看 zf_device_ips200_parallel8.h 中 IPS200_RS_PIN 宏定义  默认 P15_0
+//      WR                  查看 zf_device_ips200_parallel8.h 中 IPS200_WR_PIN 宏定义  默认 P15_2
+//      RD                  查看 zf_device_ips200_parallel8.h 中 IPS200_RD_PIN 宏定义  默认 P15_4
+//      D0-D7               查看 zf_device_ips200_parallel8.h 中 IPS200_Dx_PIN 宏定义  默认 P11_9/P11_10/P11_11/P11_12/P13_0/P13_1/P13_2/P13_3
+//      GND                 核心板电源地 GND
+//      3V3                 核心板 3V3 电源
 
-// 本例程是开源库空工程 可用作移植或者测试各类内外设
-// 本例程是开源库空工程 可用作移植或者测试各类内外设
-// 本例程是开源库空工程 可用作移植或者测试各类内外设
 
+
+// *************************** 例程测试说明 ***************************
+// 1.核心板烧录完成本例程 将核心板插在主板上 插到底
+// 2.摄像头接在主板的摄像头接口 注意线序2寸IPS模块插入主板屏幕接口
+// 3.主板上电 或者核心板链接完毕后上电 核心板按下复位按键
+// 4.屏幕会显示初始化信息然后显示摄像头图像
+// 如果发现现象与说明严重不符 请参照本文件最下方 例程常见问题说明 进行排查
 // **************************** 代码区域 ****************************
+
+#define IPS200_TYPE     (IPS200_TYPE_SPI)                                       //  SPI 两寸屏 这里宏定义填写 IPS200_TYPE_SPI（第二排丝印是NC）
+                                                                                //  并口两寸屏 这里宏定义填写 IPS200_TYPE_PARALLEL8 （第二排丝印是D0 - D7）
 
 int core0_main(void)
 {
     clock_init();                   // 获取时钟频率<务必保留>
     debug_init();                   // 初始化默认调试串口
     // 此处编写用户代码 例如外设初始化代码等
-    cpu_wait_event_ready();
 
-    run_init();
+    run_init();                     // 运行初始化函数
 
-    //ips屏幕初始化
-    ips200_set_dir(IPS200_PORTAIT); 
-    ips200_init(IPS200_TYPE_SPI);
+    ips200_init(IPS200_TYPE);
+    ips200_show_string(0, 0, "mt9v03x init."); //摄像头初始化
 
-    //摄像头初始化
-    mt9v03x_init(); 
+    while(1)
+    {
+        if(mt9v03x_init())
+            ips200_show_string(0, 80, "mt9v03x reinit.");
+        else
+            break;
+        system_delay_ms(500);                                                   // 短延时快速闪灯表示异常
+    }
 
-    // //摄像头测试，先跳过启动按键
-    // go = 1;
-    // Motor_Flag = 0;
+    ips200_show_string(0, 16, "init success.");
+
+
+    // 此处编写用户代码 例如外设初始化代码等
+    cpu_wait_event_ready();         // 等待所有核心初始化完毕
+
     while (TRUE)
     {
         // 此处编写需要循环执行的代码
-        draw_tool_process();
 
-        run_while();
+        run_while();                   // 运行循环函数
+
 
         // 此处编写需要循环执行的代码
     }
 }
+
 #pragma section all restore
 // **************************** 代码区域 ****************************
-
+// *************************** 例程常见问题说明 ***************************
+// 遇到问题时请按照以下问题检查列表检查
+// 问题1：屏幕不显示
+//      如果使用主板测试，主板必须要用电池供电 检查屏幕供电引脚电压
+//      检查屏幕是不是插错位置了 检查引脚对应关系
+//      如果对应引脚都正确 检查一下是否有引脚波形不对 需要有示波器
+//      无法完成波形测试则复制一个GPIO例程将屏幕所有IO初始化为GPIO翻转电平 看看是否受控
+// 问题2：显示 reinit 字样
+//      检查接线是否正常
+//      主板供电是否使用电量充足的电池供电
+// 问题2：显示图像杂乱 错位
+//      检查摄像头信号线是否有松动
