@@ -56,12 +56,17 @@
 #error "SERVO_MOTOR_FREQ ERROE!"
 #endif
 
+// 速度决策宏定义
+#define SPEED_LOW (20)  // 低速
+#define SPEED_MID (40)  // 中速
+#define SPEED_HIGH (60) // 高速
+
 // 全局变量
 int16 raw_left = 0;
 int16 raw_right = 0;
 int16 encoder_left = 0;
 int16 encoder_right = 0;
-int16 speed = 10;
+int16 speed = 40;
 uint8 uart_flag = 0;
 
 PID_Controller_t pid_left;
@@ -173,12 +178,29 @@ double run_get_gap(void)
     double gap = 0;
 
     // 这里读取视觉数据，并做出滤波，PD调节输出后轮差速值
-        if (NormalMidValid)
-        {
-            gap = PID_Controller_Calc(&pid_gap, 0, (double)NormalMidError);
-        }
+    if (NormalMidValid && ImageFlag.Zebra_Flag != 1) // 未识别到斑马线时
+    {
+        gap = PID_Controller_Calc(&pid_gap, 0, (double)NormalMidError);
+    }
 
     return gap;
+}
+
+// 速度决策函数
+void run_speed_decision(void)
+{
+    if (ImageFlag.Zebra_Flag == 1)
+    {
+        speed = 0;
+    }
+    else
+    {
+        // if (ImageFlag.flag == 1) // 直道加速
+        // {
+        //     speed = SPEED_HIGH;
+        // }
+        speed = 40; // 默认中速
+    }
 }
 
 // speed：速度值，正值前进，负值后退
@@ -210,6 +232,9 @@ IFX_INTERRUPT(cc60_pit_ch0_isr, 0, CCU6_0_CH0_ISR_PRIORITY)
 {
     interrupt_global_enable(0); // 开启中断嵌套
     pit_clear_flag(CCU60_CH0);
+
+    // 速度决策函数
+    run_speed_decision();
 
     run_direct(speed, (int16)run_get_gap()); // 5ms周期执行一次 run_direct() 函数
     run_servo_motor_angle((int8)run_get_gap());
