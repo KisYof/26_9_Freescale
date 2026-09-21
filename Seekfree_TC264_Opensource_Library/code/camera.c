@@ -5,6 +5,8 @@
  *      Author: 周文烽
  */
 //sobel
+#include "zf_common_headfile.h"
+#include "isr_config.h"
 #include "camera.h"
 #include "math.h"
 
@@ -149,6 +151,28 @@ uint8 Half_Ring_Wide_small[LCDH]=
 /*其他*/
 #define LimitP_L(x) (x=((x>ImageStatus.OFFLine)?x:(ImageStatus.OFFLine+2)))//对图像的前瞻进行限制，不要超过扫线截止行（后续用动态前瞻控制行的时候那里限制，这里删掉）
 #define Scan_type 1                                             //选择扫线类型 1：梯度   2：梯度加重定义
+
+IFX_INTERRUPT(exti_ch3_ch7_isr, 0, EXTI_CH3_CH7_INT_PRIO)
+{
+    interrupt_global_enable(0);
+
+    if (exti_flag_get(ERU_CH3_REQ6_P02_0))
+    {
+        exti_flag_clear(ERU_CH3_REQ6_P02_0);
+        camera_vsync_handler();
+    }
+
+    if (exti_flag_get(ERU_CH7_REQ16_P15_1))
+    {
+        exti_flag_clear(ERU_CH7_REQ16_P15_1);
+    }
+}
+
+IFX_INTERRUPT(dma_ch5_isr, 0, DMA_INT_PRIO)
+{
+    interrupt_global_enable(0);
+    camera_dma_handler();
+}
 
 //出界保护
 uint8 num=0;
