@@ -51,6 +51,14 @@ int NormalMidValue = 0;//当前帧经过近端和远端加权后得到的正常中线位置
 int NormalMidError = 0;//正常中线误差
 uint8 NormalMidValid = 0;//正常中线有效标志
 
+/* 提供给控制组的轨道斜率相关变量 */
+volatile int16 Track_Slope_x1000 = 0;   // 斜率乘以1000
+volatile uint8 Track_SlopeValid = 0;    // 1：有效，0：无效
+/* 提供给控制组的中线相关变量 */
+int ControlMidLine[LCDH];
+volatile int ControlMidValue = 0;
+volatile int ControlMidError = 0;
+volatile uint8 ControlMidValid = 0;
 
 /*直道相关变量*/
 uint8 Prospect_line=26;                                         //图像前瞻控制行
@@ -1003,9 +1011,13 @@ void Flag_init(void)
  * @parameter      void
  * @return         void
  *------------------------------------------------------------------------------------------------------------------*/
+
 void NormalMid_Update(void)
 {
     int i;
+    int x, y;
+    int white_count = 0;
+
 
     /* 近端中线累加值和有效行数 */
     int near_sum = 0;
@@ -1023,29 +1035,68 @@ void NormalMid_Update(void)
     int near_value = 0;
     int far_value = 0;
 
-    /* 1. 保存普通中线
-     * 必须在元素处理之前保存，避免 Center 被十字、环岛等逻辑修改
-     */
-    for (i = 0; i < LCDH; i++)
+    // 统计图像下方12行的白色像素数量
+    for (y = LCDH - 12; y < LCDH; y++)
     {
-        NormalMidLine[i] = ImageDeal[i].Center;
+        for (x = 0; x < LCDW; x++)
+        {
+            if (Pixle[y][x] == 255)
+            {
+                white_count++;
+            }
+        }
     }
 
-    /* 2. 计算近端中线
-     * 取图像底部5行，靠近车头的部分通常最稳定
-     */
+    // 下方几乎没有白点，认为没有赛道
+    if (white_count < 150)
+    {
+        NormalMidValid = 0;
+        NormalMidError = 0;
+
+        for (i = 0; i < LCDH; i++)
+        {
+            NormalMidLine[i] = -1;
+        }
+
+        return;
+    }
+
+    // 保存每一行中线，并且过滤明显无效的行
+    for (i = 0; i < LCDH; i++)
+    {
+        int left = ImageDeal[i].LeftBorder;
+        int right = ImageDeal[i].RightBorder;
+        int wide = right - left;
+        int center = (left + right) / 2;
+
+        if (left >= 0 && right < LCDW &&
+            wide >= 20 &&
+            center >= 0 && center < LCDW)
+        {
+            NormalMidLine[i] = center;
+        }
+        else
+        {
+            NormalMidValid = 0;
+            NormalMidError = 0;
+
+            for (i = 0; i < LCDH; i++)
+            {
+                NormalMidLine[i] = -1;
+            }
+        }
+    }
+
+    // 近端取图像底部5行
     for (i = LCDH - 5; i < LCDH; i++)
     {
-        if (ImageDeal[i].LeftBorder < ImageDeal[i].RightBorder)
+        if (NormalMidLine[i] >= 0)
         {
-            near_sum += ImageDeal[i].Center;
+            near_sum += NormalMidLine[i];
             near_cnt++;
         }
     }
 
-    /* 3. 计算远端中线
-     * 使用前瞻行附近的3行，让控制提前感知前方弯道
-     */
     far_start = Prospect_line;
     far_end = Prospect_line + 2;
 
@@ -1058,46 +1109,137 @@ void NormalMid_Update(void)
     {
         for (i = far_start; i <= far_end; i++)
         {
-            if (ImageDeal[i].LeftBorder < ImageDeal[i].RightBorder)
+            if (NormalMidLine[i] >= 0)
             {
-                far_sum += ImageDeal[i].Center;
+                far_sum += NormalMidLine[i];
                 far_cnt++;
             }
         }
     }
 
-    /* 4. 近端和远端加权，得到最终正常中线 */
-    if (near_cnt > 0)
+    // 底部5行至少要有3行有效
+    if (near_cnt >= 3)
     {
         near_value = near_sum / near_cnt;
 
         if (far_cnt > 0)
         {
             far_value = far_sum / far_cnt;
-
-            /* 近端占7成，远端占3成
-             * 近端保证稳定性，远端提供弯道预判
-             */
             NormalMidValue = (7 * near_value + 3 * far_value) / 10;
         }
         else
         {
-            /* 远端无效时，只使用近端中线 */
             NormalMidValue = near_value;
         }
 
-        /* 计算中线误差，供舵机 PID 使用 */
         NormalMidError = ImageSensorMid - NormalMidValue;
-
-        /* 本帧正常中线有效 */
         NormalMidValid = 1;
     }
     else
     {
-        /* 近端都找不到有效中线，本帧标记为无效 */
         NormalMidValid = 0;
+        NormalMidError = 0;
     }
 }
+/*------------------------------------------------------------------------------------------------------------------
+ * @name           Track_Slope_Update
+ *
+ * @brief          计算轨道斜率
+ *
+ * @details
+ *
+ * @note
+ *
+ * @parameter      void
+ * @return         void
+ *------------------------------------------------------------------------------------------------------------------*/
+#define SLOPE_NEAR_START   60
+#define SLOPE_NEAR_END     66
+
+#define SLOPE_FAR_START    32
+#define SLOPE_FAR_END      38
+
+
+void Track_Slope_Update(void)
+{
+    int y;
+
+    int near_sum = 0;
+    int near_cnt = 0;
+
+    int far_sum = 0;
+    int far_cnt = 0;
+
+    int near_x;
+    int far_x;
+    int dy;
+
+    int32_t slope;
+
+    Track_SlopeValid = 0;
+    Track_Slope_x1000 = 0;
+
+    // 正常中线无效，不给控制组斜率
+    if (ControlMidValid == 0)
+    {
+        return;
+    }
+
+    // 计算近端平均中线
+    for (y = SLOPE_NEAR_START; y <= SLOPE_NEAR_END; y++)
+    {
+        if (ControlMidLine[y] >= 0 && ControlMidLine[y] < LCDW)
+        {
+            near_sum += ControlMidLine[y];
+            near_cnt++;
+        }
+    }
+
+    // 计算远端平均中线
+    for (y = SLOPE_FAR_START; y <= SLOPE_FAR_END; y++)
+    {
+        if (ControlMidLine[y] >= 0 && ControlMidLine[y] < LCDW)
+        {
+            far_sum += ControlMidLine[y];
+            far_cnt++;
+        }
+    }
+
+    // 有效中线点太少，不计算斜率
+    if (near_cnt < 2 || far_cnt < 2)
+    {
+        return;
+    }
+
+    near_x = near_sum / near_cnt;
+    far_x  = far_sum / far_cnt;
+
+    dy = ((SLOPE_NEAR_START + SLOPE_NEAR_END) / 2)
+       - ((SLOPE_FAR_START + SLOPE_FAR_END) / 2);
+
+    if (dy <= 0)
+    {
+        return;
+    }
+
+    // 斜率放大1000倍，避免控制层频繁用浮点
+    slope = (int32_t)(far_x - near_x) * 1000 / dy;
+
+    // 防止异常值把速度控制带飞
+    if (slope > 5000)
+    {
+        slope = 5000;
+    }
+    else if (slope < -5000)
+    {
+        slope = -5000;
+    }
+
+    Track_Slope_x1000 = (int16)slope;
+    Track_SlopeValid = 1;
+}
+
+
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
 //  @name           Search_Bottom_Line_OTSU
@@ -2385,6 +2527,112 @@ void Element_Handle_Right_Rings()
     }
 }
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
+//  @name           ControlMid_Update
+//  @brief
+//  @parameter      void
+//  @time
+//  @Author
+//  Sample usage:   ControlMid_Update
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------
+void ControlMid_Update(void)
+{
+    int i;
+
+    int near_sum = 0;
+    int near_cnt = 0;
+
+    int far_sum = 0;
+    int far_cnt = 0;
+
+    int near_value = 0;
+    int far_value = 0;
+
+    int far_start;
+    int far_end;
+
+    ControlMidValid = 0;
+    ControlMidError = 0;
+
+    for (i = 0; i < LCDH; i++)
+    {
+        int center = ImageDeal[i].Center;
+        int left   = ImageDeal[i].LeftBorder;
+        int right  = ImageDeal[i].RightBorder;
+
+        /*
+         * 元素处理后的 Center 优先；
+         * 如果这一行元素处理没有修改，就退回正常中线。
+         */
+        if (center >= 0 && center < LCDW && right > left)
+        {
+            ControlMidLine[i] = center;
+        }
+        else if (NormalMidLine[i] >= 0 && NormalMidLine[i] < LCDW)
+        {
+            ControlMidLine[i] = NormalMidLine[i];
+        }
+        else
+        {
+            ControlMidLine[i] = -1;
+        }
+    }
+
+    /* 近端使用底部5行 */
+    for (i = LCDH - 5; i < LCDH; i++)
+    {
+        if (ControlMidLine[i] >= 0)
+        {
+            near_sum += ControlMidLine[i];
+            near_cnt++;
+        }
+    }
+
+    /* 远端使用前瞻附近 */
+    far_start = Prospect_line;
+    far_end   = Prospect_line + 2;
+
+    if (far_end >= LCDH)
+    {
+        far_end = LCDH - 1;
+    }
+
+    if (ImageStatus.OFFLine < far_start)
+    {
+        for (i = far_start; i <= far_end; i++)
+        {
+            if (ControlMidLine[i] >= 0)
+            {
+                far_sum += ControlMidLine[i];
+                far_cnt++;
+            }
+        }
+    }
+
+    /* 至少要有3行有效，才认为控制中线有效 */
+    if (near_cnt >= 3)
+    {
+        near_value = near_sum / near_cnt;
+
+        if (far_cnt > 0)
+        {
+            far_value = far_sum / far_cnt;
+            ControlMidValue = (7 * near_value + 3 * far_value) / 10;
+        }
+        else
+        {
+            ControlMidValue = near_value;
+        }
+
+        ControlMidError = ImageSensorMid - ControlMidValue;
+        ControlMidValid = 1;
+    }
+    else
+    {
+        ControlMidValid = 0;
+        ControlMidError = 0;
+    }
+}
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------
 //  @name
 //  @brief          整个图像处理的主函数，里面包含了所有的图像处理子函数
 //  @parameter      void
@@ -2440,6 +2688,8 @@ void Image_Process(void)
     {
 //        camera_send_image(DEBUG_UART_INDEX, (const uint8 *)Pixle, (LCDH*LCDW));      //上位机显示
 //        usar_image((const uint8 *)Pixle,(LCDH*LCDW));//串口图传
+          memset(ImageDeal, 0, sizeof(ImageDeal));
+
           //把原始图像二值化
           Get_BinaryImage();                              //调用此函数时，记得在Get_Border_And_SideType把1改成255，不用的时候改回来
 
@@ -2452,18 +2702,21 @@ void Image_Process(void)
           //计算正常中线
           NormalMid_Update();
 
+          Search_Border_OTSU(Pixle, LCDH, LCDW, LCDH - 2);
+
+          //元素判断
+          Scan_Element();
+          //元素处理
+          Element_Handle();
+
+          // 这里计算轨道斜率
+          Track_Slope_Update();
+
            //正常中线有效时，控制层使用正常中线误差
-           if (NormalMidValid)
-            {
-                 ImageStatus.Det_True = NormalMidError;
-            }
-
-           Search_Border_OTSU(Pixle, LCDH, LCDW, LCDH - 2);
-
-           //元素判断
-           Scan_Element();
-           //元素处理
-           Element_Handle();
+           if (ControlMidValid)
+           {
+              ImageStatus.Det_True = ControlMidError;
+           }
 
 
      mt9v03x_finish_flag=0;     //这一帧已经处理完了  可以开始下一帧

@@ -37,29 +37,36 @@ void draw_tool_process(void)
 //    ips200_show_gray_image(0, 0, mt9v03x_image[0], MT9V03X_W, MT9V03X_H, MT9V03X_W, MT9V03X_H, 0);//原始图
 
     // 2. 在二值图上画蓝色正常中线
-    /*for (i = 0; i < LCDH; i++)
-    {
-        // 图像坐标映射到IPS200显示区域
-        x = (uint16)(NormalMidLine[i] * 200 / LCDW);
-        y = (uint16)(i * 120 / LCDH);
 
-        ips200_draw_point(x, y, RGB565_BLUE);
-    }*/
-  for (i = 0; i < LCDH; i++)
+//  for (i = 0; i < LCDH; i++)
+//      {
+//          // 跳过异常的图像坐标，避免越界
+//          if (NormalMidLine[i] < 0 || NormalMidLine[i] >= LCDW)
+//          {
+//              continue;
+//          }
+//
+//          // 图像坐标映射到 IPS200 显示区域
+//          x = (uint16)(NormalMidLine[i] * 200 / LCDW);
+//          y = (uint16)(i * 120 / LCDH);
+//
+//          ips200_draw_point(x, y, RGB565_BLUE);
+//      }
+  if (NormalMidValid)//只有中线合理时才画中线
+  {
+      for (i = 0; i < LCDH; i++)
       {
-          // 跳过异常的图像坐标，避免越界
           if (NormalMidLine[i] < 0 || NormalMidLine[i] >= LCDW)
           {
               continue;
           }
 
-          // 图像坐标映射到 IPS200 显示区域
           x = (uint16)(NormalMidLine[i] * 200 / LCDW);
           y = (uint16)(i * 120 / LCDH);
 
           ips200_draw_point(x, y, RGB565_BLUE);
       }
-
+  }
 
     // 3. 显示正常中线位置
     ips200_show_string(0, 140, "MV:");
@@ -95,6 +102,13 @@ void draw_tool_process(void)
     ips200_show_string(0, 300, "L/R:");//左边数字 = 左圆环检测次数  右边数字 = 右圆环检测次数
     ips200_show_int(80, 300, left_ring_num, 2);
     ips200_show_int(120, 300, right_ring_num, 2);
+
+    //轨道斜率测试
+    ips200_show_string(120, 140, "Slope:");
+    ips200_show_int(140, 140, Track_Slope_x1000, 5);
+
+    ips200_show_string(120, 160, "SValid:");
+    ips200_show_int(140, 160, Track_SlopeValid, 1);
 
 }
 

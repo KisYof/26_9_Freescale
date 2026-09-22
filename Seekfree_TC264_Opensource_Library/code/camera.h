@@ -55,6 +55,18 @@ extern uint8 NormalMidValid;
 
 void NormalMid_Update(void);
 
+extern volatile int16 Track_Slope_x1000;
+extern volatile uint8 Track_SlopeValid;
+
+void Track_Slope_Update(void);
+
+extern int ControlMidLine[];
+extern volatile int ControlMidValue;
+extern volatile int ControlMidError;
+extern volatile uint8 ControlMidValid;
+
+void ControlMid_Update(void);
+
 
 
 //每一行的属性
