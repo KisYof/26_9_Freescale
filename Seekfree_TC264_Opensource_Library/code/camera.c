@@ -52,7 +52,7 @@ int NormalMidError = 0;//正常中线误差
 uint8 NormalMidValid = 0;//正常中线有效标志
 
 /* 提供给控制组的轨道斜率相关变量 */
-volatile int16 Track_Slope_x1000 = 0;   // 斜率乘以1000
+volatile int16 Track_Slope_x1000 = 0;   // 斜率乘以1000  >0：右轨道 <0：左轨道
 volatile uint8 Track_SlopeValid = 0;    // 1：有效，0：无效
 /* 提供给控制组的中线相关变量 */
 int ControlMidLine[LCDH];
@@ -1035,6 +1035,9 @@ void NormalMid_Update(void)
     int near_value = 0;
     int far_value = 0;
 
+    /* 1. 保存普通中线
+    * 必须在元素处理之前保存，避免 Center 被十字、环岛等逻辑修改
+    */
     // 统计图像下方12行的白色像素数量
     for (y = LCDH - 12; y < LCDH; y++)
     {
@@ -1075,6 +1078,9 @@ void NormalMid_Update(void)
         {
             NormalMidLine[i] = center;
         }
+        /* 2. 计算近端中线
+         * 取图像底部5行，靠近车头的部分通常最稳定
+         */
         else
         {
             NormalMidValid = 0;
@@ -1096,7 +1102,9 @@ void NormalMid_Update(void)
             near_cnt++;
         }
     }
-
+    /* 3. 计算远端中线
+     * 使用前瞻行附近的3行，让控制提前感知前方弯道
+     */
     far_start = Prospect_line;
     far_end = Prospect_line + 2;
 
@@ -1117,6 +1125,7 @@ void NormalMid_Update(void)
         }
     }
 
+    /* 4. 近端和远端加权，得到最终正常中线 */
     // 底部5行至少要有3行有效
     if (near_cnt >= 3)
     {
@@ -2633,7 +2642,45 @@ void ControlMid_Update(void)
     }
 }
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
-//  @name
+//  @name           LineLost_Protection_Update
+//  @brief
+//  @parameter      void
+//  @note           每帧检查 ControlMidValid → 连续无效则增加 LineLostCount → 达到阈值后设置 LineLostFlag
+//  @note           → 严重丢线后设置 VisionStopFlag → ControlMidValid 恢复后清零计数
+//  @time
+//  @Author
+//  Sample usage:   丢线保护
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------
+//丢线保护状态量：
+volatile uint8 LineLostCount = 0;
+volatile uint8 LineLostFlag  = 0;
+volatile uint8 VisionStopFlag = 0;
+void LineLost_Protection_Update(void)
+{
+    if (ControlMidValid)//若ControlMidValid = 1：LineLostCount 清零
+    {
+        LineLostCount = 0;
+        LineLostFlag  = 0;
+        return;
+    }
+
+    if (LineLostCount < 255)
+    {
+        LineLostCount++;
+    }
+
+    if (LineLostCount >= 3)//连续 3 帧没有有效控制中线时
+    {
+        LineLostFlag = 1;// LineLostFlag标志位置1 控制组看到它以后可以减速
+    }
+
+    if (LineLostCount >= 10)//连续 10 帧无效
+    {
+        VisionStopFlag = 1;//VisionStopFlag置1 控制组看到它以后可以停车
+    }
+}
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------
+//  @name           Image_Process
 //  @brief          整个图像处理的主函数，里面包含了所有的图像处理子函数
 //  @parameter      void
 //  @time           2023年2月19日
@@ -2709,7 +2756,12 @@ void Image_Process(void)
           //元素处理
           Element_Handle();
 
-          // 这里计算轨道斜率
+          //
+          ControlMid_Update();
+          //丢线保护计算
+          LineLost_Protection_Update();
+
+          // 计算轨道斜率
           Track_Slope_Update();
 
            //正常中线有效时，控制层使用正常中线误差

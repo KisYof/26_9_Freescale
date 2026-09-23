@@ -67,6 +67,11 @@ extern volatile uint8 ControlMidValid;
 
 void ControlMid_Update(void);
 
+extern volatile uint8 LineLostCount;
+extern volatile uint8 LineLostFlag;
+extern volatile uint8 VisionStopFlag;
+
+void LineLost_Protection_Update(void);
 
 
 //每一行的属性
