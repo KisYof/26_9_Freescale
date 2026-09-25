@@ -3,13 +3,13 @@
 #include "filter.h"
 #include "camera.h"
 
-// ������
-#define DIR_R2 (P21_2) // ʵ��ʹ�õĵ����
+// 电机相关
+#define DIR_R2 (P21_2) // 实际使用的电机组
 #define PWM_R2 (ATOM0_CH1_P21_3)
 #define DIR_L2 (P21_4)
 #define PWM_L2 (ATOM0_CH3_P21_5)
 
-// ���������
+// 编码器相关
 #define ENCODER_1 (TIM2_ENCODER)
 #define ENCODER_1_A (TIM2_ENCODER_CH1_P33_7)
 #define ENCODER_1_B (TIM2_ENCODER_CH2_P33_6)
@@ -18,50 +18,50 @@
 #define ENCODER_2_A (TIM6_ENCODER_CH1_P20_3)
 #define ENCODER_2_B (TIM6_ENCODER_CH2_P20_0)
 
-// ������->ʵ���ٶ�ת������M����������������������� pulse_cnt��
-#define ENCODER_MULTIPLE 1.0f                                                             // ��������Ƶ��1��Ƶ
-#define PULSE_PRE_ROUND 1024.0f                                                           // �������������ÿתһȦ����������1024��
-#define WHEEL_TO_ENCODER_RATIO (68.0f / 30.0f)                                            // ���ٱȣ����ֳ���/�������������Ӹ���С����
-#define PULSE_PER_WHEEL_REV (WHEEL_TO_ENCODER_RATIO * PULSE_PRE_ROUND * ENCODER_MULTIPLE) // ����ת����һȦ���������ܹ���������������
-#define RADIUS_OF_TYRE 3.2f                                                               // ���Ӱ뾶 cm
-#define LINE_SPEED_CM_REV (RADIUS_OF_TYRE * 2.0f * 3.1415926f)                            // �����ܳ� cm
+// 编码器->实际速度转化，（M法：输入采样窗口内脉冲数 pulse_cnt）
+#define ENCODER_MULTIPLE 1.0f                                                             // 编码器倍频，1倍频
+#define PULSE_PRE_ROUND 1024.0f                                                           // 编码器【电机轴每转一圈】脉冲数，1024线
+#define WHEEL_TO_ENCODER_RATIO (68.0f / 30.0f)                                            // 减速比：车轮齿数/编码器齿数，加浮点小数点
+#define PULSE_PER_WHEEL_REV (WHEEL_TO_ENCODER_RATIO * PULSE_PRE_ROUND * ENCODER_MULTIPLE) // 车轮转完整一圈，编码器总共产生的脉冲数据
+#define RADIUS_OF_TYRE 3.2f                                                               // 轮子半径 cm
+#define LINE_SPEED_CM_REV (RADIUS_OF_TYRE * 2.0f * 3.1415926f)                            // 轮子周长 cm
 
-#define SAMPLE_TIME_S 0.005f // M���������ڣ�5ms = 0.005��
+#define SAMPLE_TIME_S 0.005f // M法采样周期：5ms = 0.005秒
 
-#define CALC_WHEEL_RPS(pulse_cnt) ((pulse_cnt) / (PULSE_PER_WHEEL_REV * SAMPLE_TIME_S)) // �������ת�� rps��Ȧ/�룩
-#define CALC_LINE_SPEED_CM_S(pulse_cnt) (CALC_WHEEL_RPS(pulse_cnt) * LINE_SPEED_CM_REV) // ������ٶ� cm/s
-#define CALC_LINE_SPEED_M_S(pulse_cnt) (CALC_LINE_SPEED_CM_S(pulse_cnt) / 100.0f)       // ������ٶ� m/s
+#define CALC_WHEEL_RPS(pulse_cnt) ((pulse_cnt) / (PULSE_PER_WHEEL_REV * SAMPLE_TIME_S)) // 输出车轮转速 rps（圈/秒）
+#define CALC_LINE_SPEED_CM_S(pulse_cnt) (CALC_WHEEL_RPS(pulse_cnt) * LINE_SPEED_CM_REV) // 输出线速度 cm/s
+#define CALC_LINE_SPEED_M_S(pulse_cnt) (CALC_LINE_SPEED_CM_S(pulse_cnt) / 100.0f)       // 输出线速度 m/s
 
-// ������
-#define SERVO_MOTOR_PWM (ATOM1_CH5_P20_9) // ���������϶����Ӧ����
-#define SERVO_MOTOR_FREQ (50)             // ���������϶��Ƶ��  �����ע�ⷶΧ 50-300
+// 舵机相关
+#define SERVO_MOTOR_PWM (ATOM1_CH1_P33_9) // 定义主板上舵机对应引脚
+#define SERVO_MOTOR_FREQ (50)             // 定义主板上舵机频率  请务必注意范围 50-300
 
-#define SERVO_MOTOR_L_MAX (70) // ���������϶�����Χ �Ƕ�
+#define SERVO_MOTOR_L_MAX (70) // 定义主板上舵机活动范围 角度
 #define SERVO_MOTOR_R_MAX (110)
 
-// ------------------ ���ռ�ձȼ��㷽ʽ ------------------
+// ------------------ 舵机占空比计算方式 ------------------
 //
-// �����Ӧ�� 0-180 ��Ƕȶ�Ӧ ��������� 0.5ms-2.5ms �ߵ�ƽ
+// 舵机对应的 0-180 活动角度对应 控制脉冲的 0.5ms-2.5ms 高电平
 //
-// ��ô��ͬƵ���µ�ռ�ձȼ��㷽ʽ����
-// PWM_DUTY_MAX/(1000/freq)*(1+Angle/180) �� 50hz ʱ���� PWM_DUTY_MAX/(1000/50)*(1+Angle/180)
+// 那么不同频率下的占空比计算方式就是
+// PWM_DUTY_MAX/(1000/freq)*(1+Angle/180) 在 50hz 时就是 PWM_DUTY_MAX/(1000/50)*(1+Angle/180)
 //
-// ��ô 100hz �� 90�ȵĴ�� ���ߵ�ƽʱ��1.5ms ��������Ϊ
+// 那么 100hz 下 90度的打角 即高电平时间1.5ms 计算套用为
 // PWM_DUTY_MAX/(1000/100)*(1+90/180) = PWM_DUTY_MAX/10*1.5
 //
-// ------------------ ���ռ�ձȼ��㷽ʽ ------------------
+// ------------------ 舵机占空比计算方式 ------------------
 #define SERVO_MOTOR_DUTY(x) ((float)PWM_DUTY_MAX / (1000.0 / (float)SERVO_MOTOR_FREQ) * (0.5 + (float)(x) / 90.0))
 
 #if (SERVO_MOTOR_FREQ < 50 || SERVO_MOTOR_FREQ > 300)
 #error "SERVO_MOTOR_FREQ ERROE!"
 #endif
 
-// �ٶȾ��ߺ궨��
-#define SPEED_LOW (20)  // ����
-#define SPEED_MID (40)  // ����
-#define SPEED_HIGH (60) // ����
+// 速度决策宏定义
+#define SPEED_LOW (20)  // 低速
+#define SPEED_MID (40)  // 中速
+#define SPEED_HIGH (60) // 高速
 
-// ȫ�ֱ���
+// 全局变量
 int16 raw_left = 0;
 int16 raw_right = 0;
 int16 encoder_left = 0;
@@ -71,50 +71,50 @@ uint8 uart_flag = 0;
 
 PID_Controller_t pid_left;
 PID_Controller_t pid_right;
-PID_Controller_t pid_gap; // PD����λ�û�
+PID_Controller_t pid_gap; // PD差速位置环
 
-// �������˲�
-// ����ƽ���˲�
-#define ENCODER_FILTER_WINDOW 32 // �������ڴ�С�����64
+// 编码器滤波
+// 滑动平均滤波
+#define ENCODER_FILTER_WINDOW 32 // 滑动窗口大小，最大64
 static filter_ring_t encoder_left_ring;
 static filter_ring_t encoder_right_ring;
 static float encoder_left_buffer[ENCODER_FILTER_WINDOW];
 static float encoder_right_buffer[ENCODER_FILTER_WINDOW];
 
-// rc��ͨ�˲���
+// rc低通滤波器
 static filter_rc_state_t encoder_left_filter;
 static filter_rc_state_t encoder_right_filter;
 
 void run_init(void)
 {
-    pit_ms_init(CCU60_CH1, 10); // 10ms����һ���ж�
+    pit_ms_init(CCU60_CH1, 10); // 10ms产生一次中断
 
-    // ���������ʼ��
-    gpio_init(DIR_R2, GPO, GPIO_HIGH, GPO_PUSH_PULL); // GPIO ��ʼ��Ϊ��� Ĭ�����������
-    pwm_init(PWM_R2, 17000, 0);                       // PWM ͨ����ʼ��Ƶ�� 17KHz ռ�ձȳ�ʼΪ 0
-    gpio_init(DIR_L2, GPO, GPIO_HIGH, GPO_PUSH_PULL); // GPIO ��ʼ��Ϊ��� Ĭ���������
+    // 电机驱动初始化
+    gpio_init(DIR_R2, GPO, GPIO_HIGH, GPO_PUSH_PULL); // GPIO 初始化为输出 默认上拉输出高
+    pwm_init(PWM_R2, 17000, 0);                       // PWM 通道初始化频率 17KHz 占空比初始为 0
+    gpio_init(DIR_L2, GPO, GPIO_HIGH, GPO_PUSH_PULL); // GPIO 初始化为输出 默认上拉输出
     pwm_init(PWM_L2, 17000, 0);
 
-    // ��������ʼ��
-    encoder_dir_init(ENCODER_1, ENCODER_1_A, ENCODER_1_B); // ��ʼ��������ģ�������� �������������ģʽ
-    encoder_dir_init(ENCODER_2, ENCODER_2_A, ENCODER_2_B); // ��ʼ��������ģ�������� �������������ģʽ
-    pit_ms_init(CCU60_CH0, 5);                             // 5ms����һ���ж�
+    // 编码器初始化
+    encoder_dir_init(ENCODER_1, ENCODER_1_A, ENCODER_1_B); // 初始化编码器模块与引脚 正交解码编码器模式
+    encoder_dir_init(ENCODER_2, ENCODER_2_A, ENCODER_2_B); // 初始化编码器模块与引脚 正交解码编码器模式
+    pit_ms_init(CCU60_CH0, 5);                             // 5ms产生一次中断
 
-    // �����ʼ��
+    // 舵机初始化
     pwm_init(SERVO_MOTOR_PWM, SERVO_MOTOR_FREQ, 0);
 
-    // ���PID��ʼ��
+    // 电机PID初始化
     PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 1, 0.1, 0.0, 1500, -1500, 0, 0);
     PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 1, 0.1, 0.0, 1500, -1500, 0, 0);
 
-    // ת��λ�û�
+    // 转向位置环
     PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 0.3, 0.0, 0.0, 50, -50, 0, 0);
 
-    // ������ƽ���˲���ʼ��
+    // 编码器平均滤波初始化
     filter_ring_init(&encoder_left_ring, encoder_left_buffer, ENCODER_FILTER_WINDOW);
     filter_ring_init(&encoder_right_ring, encoder_right_buffer, ENCODER_FILTER_WINDOW);
 
-    // ��������ͨ�˲��˲���ʼ��
+    // 编码器低通滤波滤波初始化
     filter_rc_state_reset(&encoder_left_filter);
     filter_rc_state_reset(&encoder_right_filter);
 }
@@ -128,37 +128,37 @@ void run_while(void)
     }
 }
 
-// ռ�ձ�duty:0-10000
+// 占空比duty:0-10000
 void run_motor_left_speed(int16 duty)
 {
-    if (duty >= 0) // ��ת
+    if (duty >= 0) // 正转
     {
-        gpio_set_level(DIR_L2, GPIO_HIGH);                   // DIR����ߵ�ƽ
-        pwm_set_duty(PWM_L2, duty * (PWM_DUTY_MAX / 10000)); // ����ռ�ձ�
+        gpio_set_level(DIR_L2, GPIO_HIGH);                   // DIR输出高电平
+        pwm_set_duty(PWM_L2, duty * (PWM_DUTY_MAX / 10000)); // 计算占空比
     }
-    else // ��ת
+    else // 反转
     {
-        gpio_set_level(DIR_L2, GPIO_LOW);                       // DIR����͵�ƽ
-        pwm_set_duty(PWM_L2, (-duty) * (PWM_DUTY_MAX / 10000)); // ����ռ�ձ�
+        gpio_set_level(DIR_L2, GPIO_LOW);                       // DIR输出低电平
+        pwm_set_duty(PWM_L2, (-duty) * (PWM_DUTY_MAX / 10000)); // 计算占空比
     }
 }
 
-// ռ�ձ�duty:0-10000
+// 占空比duty:0-10000
 void run_motor_right_speed(int16 duty)
 {
-    if (duty >= 0) // ��ת
+    if (duty >= 0) // 正转
     {
-        gpio_set_level(DIR_R2, GPIO_LOW);                    // DIR����͵�ƽ
-        pwm_set_duty(PWM_R2, duty * (PWM_DUTY_MAX / 10000)); // ����ռ�ձ�
+        gpio_set_level(DIR_R2, GPIO_LOW);                    // DIR输出低电平
+        pwm_set_duty(PWM_R2, duty * (PWM_DUTY_MAX / 10000)); // 计算占空比
     }
-    else // ��ת
+    else // 反转
     {
-        gpio_set_level(DIR_R2, GPIO_HIGH);                      // DIR����ߵ�ƽ
-        pwm_set_duty(PWM_R2, (-duty) * (PWM_DUTY_MAX / 10000)); // ����ռ�ձ�
+        gpio_set_level(DIR_R2, GPIO_HIGH);                      // DIR输出高电平
+        pwm_set_duty(PWM_R2, (-duty) * (PWM_DUTY_MAX / 10000)); // 计算占空比
     }
 }
 
-// angle����ֵ��ת����ֵ��ת�����뷶ΧΪ��-20~20����
+// angle：正值右转，负值左转，输入范围为（-20~20）度
 void run_servo_motor_angle(int8 angle)
 {
     if (90 - angle < SERVO_MOTOR_L_MAX)
@@ -172,13 +172,13 @@ void run_servo_motor_angle(int8 angle)
     pwm_set_duty(SERVO_MOTOR_PWM, (uint32)SERVO_MOTOR_DUTY(90 - angle));
 }
 
-// ͨ���Ӿ���ȡС������ֵ�Ͷ��ת��ֵ
+// 通过视觉获取小车差速值和舵机转向值
 double run_get_gap(void)
 {
     double gap = 0;
 
-    // �����ȡ�Ӿ����ݣ��������˲���PD����������ֲ���ֵ
-    if (NormalMidValid && ImageFlag.Zebra_Flag != 1) // δʶ�𵽰�����ʱ
+    // 这里读取视觉数据，并做出滤波，PD调节输出后轮差速值
+    if (NormalMidValid && ImageFlag.Zebra_Flag != 1) // 未识别到斑马线时
     {
         gap = PID_Controller_Calc(&pid_gap, 0, (double)NormalMidError);
     }
@@ -186,7 +186,7 @@ double run_get_gap(void)
     return gap;
 }
 
-// �ٶȾ��ߺ���
+// 速度决策函数
 void run_speed_decision(void)
 {
     if (ImageFlag.Zebra_Flag == 1)
@@ -195,31 +195,31 @@ void run_speed_decision(void)
     }
     else
     {
-        // if (ImageFlag.flag == 1) // ֱ������
+        // if (ImageFlag.flag == 1) // 直道加速
         // {
         //     speed = SPEED_HIGH;
         // }
-        speed = 40; // Ĭ������
+        speed = 40; // 默认中速
     }
 }
 
-// speed���ٶ�ֵ����ֵǰ������ֵ����
-// gap: ���ҵ���ٶȲ�ֵ����ֵ��ת����ֵ��ת
+// speed：速度值，正值前进，负值后退
+// gap: 左右电机速度差值，正值右转，负值左转
 void run_direct(int16 speed, int16 gap)
 {
-    raw_left = CALC_LINE_SPEED_CM_S(-encoder_get_count(ENCODER_1)); // ��ȡ����������
+    raw_left = CALC_LINE_SPEED_CM_S(-encoder_get_count(ENCODER_1)); // 获取编码器计数
     encoder_left = raw_left;
-    filter_ring_write(&encoder_left_ring, encoder_left); // д��������
+    filter_ring_write(&encoder_left_ring, encoder_left); // 写入新数据
     encoder_left = filter_moving_average(&encoder_left_ring);
     encoder_left = filter_rc_low_pass(&encoder_left_filter, encoder_left, 0.2);
-    encoder_clear_count(ENCODER_1); // ��ձ���������
+    encoder_clear_count(ENCODER_1); // 清空编码器计数
 
-    raw_right = CALC_LINE_SPEED_CM_S(encoder_get_count(ENCODER_2)); // ��ȡ����������
+    raw_right = CALC_LINE_SPEED_CM_S(encoder_get_count(ENCODER_2)); // 获取编码器计数
     encoder_right = raw_right;
-    filter_ring_write(&encoder_right_ring, encoder_right); // д��������
+    filter_ring_write(&encoder_right_ring, encoder_right); // 写入新数据
     encoder_right = filter_moving_average(&encoder_right_ring);
     encoder_right = filter_rc_low_pass(&encoder_right_filter, encoder_right, 0.2);
-    encoder_clear_count(ENCODER_2); // ��ձ���������
+    encoder_clear_count(ENCODER_2); // 清空编码器计数
 
     int16 left_speed = (int16)PID_Controller_Calc(&pid_left, speed, encoder_left);
     int16 right_speed = (int16)PID_Controller_Calc(&pid_right, speed, encoder_right);
@@ -230,20 +230,20 @@ void run_direct(int16 speed, int16 gap)
 
 IFX_INTERRUPT(cc60_pit_ch0_isr, 0, CCU6_0_CH0_ISR_PRIORITY)
 {
-    interrupt_global_enable(0); // �����ж�Ƕ��
+    interrupt_global_enable(0); // 开启中断嵌套
     pit_clear_flag(CCU60_CH0);
 
-    // �ٶȾ��ߺ���
+    // 速度决策函数
     run_speed_decision();
 
-    run_direct(speed, (int16)run_get_gap()); // 5ms����ִ��һ�� run_direct() ����
+    run_direct(speed, (int16)run_get_gap()); // 5ms周期执行一次 run_direct() 函数
     run_servo_motor_angle((int8)run_get_gap());
 }
 IFX_INTERRUPT(cc60_pit_ch1_isr, 0, CCU6_0_CH1_ISR_PRIORITY)
 {
-    interrupt_global_enable(0); // �����ж�Ƕ��
+    interrupt_global_enable(0); // 开启中断嵌套
     pit_clear_flag(CCU60_CH1);
 
-    uart_flag = 1; // ���ñ�־λ����ʾ���Դ�ӡ����
+    uart_flag = 1; // 设置标志位，表示可以打印数据
 }
 
