@@ -69,9 +69,10 @@ void core1_main(void)
     {
         // 此处编写需要循环执行的代码
 
-        Image_Process();//图像处理
-
-        draw_tool_process();//显示二值图、中线和调试数据
+        if (Image_Process()) //图像处理
+        {
+            draw_tool_process();//显示二值图、中线和调试数据
+        }
 
 
         // 此处编写需要循环执行的代码

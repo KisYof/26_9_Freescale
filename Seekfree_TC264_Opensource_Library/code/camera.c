@@ -160,14 +160,22 @@ uint8 Half_Ring_Wide_small[LCDH]=
 #define LimitP_L(x) (x=((x>ImageStatus.OFFLine)?x:(ImageStatus.OFFLine+2)))//对图像的前瞻进行限制，不要超过扫线截止行（后续用动态前瞻控制行的时候那里限制，这里删掉）
 #define Scan_type 1                                             //选择扫线类型 1：梯度   2：梯度加重定义
 
+static volatile uint8 image_processing = 0;
+
 IFX_INTERRUPT(exti_ch3_ch7_isr, 0, EXTI_CH3_CH7_INT_PRIO)
 {
     interrupt_global_enable(0);
 
     if (exti_flag_get(ERU_CH3_REQ6_P02_0))
     {
-        exti_flag_clear(ERU_CH3_REQ6_P02_0);
-        camera_vsync_handler();
+        if (image_processing || mt9v03x_finish_flag)
+        {
+            exti_flag_clear(ERU_CH3_REQ6_P02_0);
+        }
+        else
+        {
+            camera_vsync_handler();
+        }
     }
 
     if (exti_flag_get(ERU_CH7_REQ16_P15_1))
@@ -1017,7 +1025,7 @@ void NormalMid_Update(void)
     int i;
     int x, y;
     int white_count = 0;
-
+    int valid_start;
 
     /* 近端中线累加值和有效行数 */
     int near_sum = 0;
@@ -1034,6 +1042,15 @@ void NormalMid_Update(void)
     /* 近端和远端的平均中线值 */
     int near_value = 0;
     int far_value = 0;
+
+    NormalMidValid = 0;
+    NormalMidValue = ImageSensorMid;
+    NormalMidError = 0;
+
+    for (i = 0; i < LCDH; i++)
+    {
+        NormalMidLine[i] = -1;
+    }
 
     /* 1. 保存普通中线
     * 必须在元素处理之前保存，避免 Center 被十字、环岛等逻辑修改
@@ -1053,46 +1070,33 @@ void NormalMid_Update(void)
     // 下方几乎没有白点，认为没有赛道
     if (white_count < 150)
     {
-        NormalMidValid = 0;
-        NormalMidError = 0;
-
-        for (i = 0; i < LCDH; i++)
-        {
-            NormalMidLine[i] = -1;
-        }
-
         return;
     }
 
-    // 保存每一行中线，并且过滤明显无效的行
-    for (i = 0; i < LCDH; i++)
+    /* OFFLine 以上没有经过 Get_AllLine() 填充，不能据此判整帧无效。 */
+    valid_start = (int)ImageStatus.OFFLine + 1;
+
+    // 只保存扫线有效区域内的合法中点，异常行保持为 -1
+    for (i = valid_start; i < LCDH; i++)
     {
         int left = ImageDeal[i].LeftBorder;
         int right = ImageDeal[i].RightBorder;
         int wide = right - left;
         int center = (left + right) / 2;
 
-        if (left >= 0 && right < LCDW &&
+        if (left >= 0 && left < LCDW &&
+            right >= 0 && right < LCDW &&
+            right > left &&
             wide >= 20 &&
             center >= 0 && center < LCDW)
         {
             NormalMidLine[i] = center;
         }
-        /* 2. 计算近端中线
-         * 取图像底部5行，靠近车头的部分通常最稳定
-         */
-        else
-        {
-            NormalMidValid = 0;
-            NormalMidError = 0;
-
-            for (i = 0; i < LCDH; i++)
-            {
-                NormalMidLine[i] = -1;
-            }
-        }
     }
 
+    /* 2. 计算近端中线
+     * 取图像底部5行，靠近车头的部分通常最稳定
+     */
     // 近端取图像底部5行
     for (i = LCDH - 5; i < LCDH; i++)
     {
@@ -2728,11 +2732,13 @@ void Element_Handle()
     Protect_Without_Road(LCDH-6,LCDH-1,5,LCDW-6);
 
 }
-void Image_Process(void)
+uint8 Image_Process(void)
 {
     if (mt9v03x_finish_flag == 1)                         //如果一帧图像采集完了，那么就可以对这副图像进行处理了。摄像头完成一帧 ->二值化
 
     {
+          image_processing = 1;
+          mt9v03x_finish_flag = 0;
 //        camera_send_image(DEBUG_UART_INDEX, (const uint8 *)Pixle, (LCDH*LCDW));      //上位机显示
 //        usar_image((const uint8 *)Pixle,(LCDH*LCDW));//串口图传
           memset(ImageDeal, 0, sizeof(ImageDeal));
@@ -2771,11 +2777,10 @@ void Image_Process(void)
            }
 
 
-     mt9v03x_finish_flag=0;     //这一帧已经处理完了  可以开始下一帧
-
-
+          image_processing = 0;
+          return 1;
     }
+
+    return 0;
 }
-
-
 

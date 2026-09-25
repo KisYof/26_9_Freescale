@@ -8,6 +8,8 @@
 #include "Camera_tool.h"
 #include "zf_common_headfile.h"
 
+#define DISPLAY_FRAME_DIVIDER (2U)
+
 /*------------------------------------------------------------------------------------------------------------------
  * @brief          在IPS200上显示二值图、正常中线和调试数据
  * @note           显示内容：
@@ -24,7 +26,7 @@ void draw_tool_process(void)
     uint16 y;
 
 
-    if (++update_cnt < 2)
+    if (++update_cnt < DISPLAY_FRAME_DIVIDER)
     {
         return;
     }
@@ -111,7 +113,5 @@ void draw_tool_process(void)
     ips200_show_int(140, 160, Track_SlopeValid, 1);
 
 }
-
-
 
 

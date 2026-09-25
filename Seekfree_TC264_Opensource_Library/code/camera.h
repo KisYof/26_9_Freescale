@@ -147,7 +147,7 @@ extern int ImageScanInterval;
 
 uint8 Protect_Without_Road(uint8 StartLine,uint8 EndLine,uint8 StartRow,uint8 EndRow);
 void Image_CutInit(void);
-void Image_Process(void);
+uint8 Image_Process(void);
 void Get_BinaryImage(void);
 uint8_t GetOSTU(uint8 image[MT9V03X_H][MT9V03X_W],int height,int wight);
 void Get_Border_And_SideType_MidWhite(uint8* p,uint8 type,int L,int H,JumpPointtypedef* Q) ;
