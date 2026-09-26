@@ -39,6 +39,8 @@
 #include "Camera.h"
 #include "Camera_tool.h"
 
+#define CAMERA_LOCAL_DISPLAY_ENABLE    (0)
+
 // 将本语句与#pragma section all restore语句之间的全局变量都放在CPU1的RAM中
 
 
@@ -71,7 +73,9 @@ void core1_main(void)
 
         if (Image_Process()) //图像处理
         {
+#if CAMERA_LOCAL_DISPLAY_ENABLE
             draw_tool_process();//显示二值图、中线和调试数据
+#endif
         }
 
 
