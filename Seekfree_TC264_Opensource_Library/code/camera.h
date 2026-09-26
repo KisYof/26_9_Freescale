@@ -30,6 +30,7 @@ extern uint8 Garage_Location_Flag;                           //暂时没用到
 extern int32 Image_Scan_Length;                              //暂时没用到
 extern uint8 Threshold;                                      //每一帧图像的二值化阈值
 extern uint8 Pixle[LCDH][LCDW];                              //二值化后的图像
+extern volatile uint32 VisionFrameSequence;                  // Odd: processing, even: stable processed frame
 extern uint8* Image_Use[LCDH][LCDW];                         //裁剪后图像各像素的地址
 extern uint16 Ramp_cnacel;                                   //坡道标志取消
 extern uint8 ramp_finish_flag;                               //坡道状态结束
@@ -72,6 +73,8 @@ extern volatile uint8 LineLostFlag;
 extern volatile uint8 VisionStopFlag;
 
 void LineLost_Protection_Update(void);
+void Camera_RequestRuntimeReset(void);
+uint8 Camera_RuntimeResetPending(void);
 
 
 //每一行的属性

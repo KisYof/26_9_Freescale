@@ -15,6 +15,7 @@
 /*图像基础信息的变量*/
 //uint8* Image_Use;                                   //用来存储压缩之后灰度图像的二维数组
 uint8 Pixle[LCDH][LCDW];                                        //图像处理时真正处理的二值化图像数组
+volatile uint32 VisionFrameSequence = 0;                         // Odd while CPU1 updates Pixle, even when stable
 float Mh=MT9V03X_H;                                             //压缩图像时用来接原图的高
 float Mw=MT9V03X_W;                                             //压缩图像时用来接原图的宽
 float Lh=LCDH;                                                  //压缩图像后的高
@@ -161,6 +162,46 @@ uint8 Half_Ring_Wide_small[LCDH]=
 #define Scan_type 1                                             //选择扫线类型 1：梯度   2：梯度加重定义
 
 static volatile uint8 image_processing = 0;
+static volatile uint8 vision_runtime_reset_request = 0;
+
+static void Camera_ClearRuntimeState(void)
+{
+    memset(&ImageFlag, 0, sizeof(ImageFlag));
+    memset(&ImageStatus, 0, sizeof(ImageStatus));
+
+    Zebra_Bottom_flag = 0;
+    Zebra_Miss_flag = 0;
+    NO_zhidao_add_flag = 0;
+    LongestLine_Found_flag = 0;
+    Ring_Help_Flag = 0;
+    left_ring_num = 0;
+    right_ring_num = 0;
+    num = 0;
+    numchujie = 0;
+
+    NormalMidValue = 0;
+    NormalMidError = 0;
+    NormalMidValid = 0;
+    ControlMidValue = 0;
+    ControlMidError = 0;
+    ControlMidValid = 0;
+    Track_Slope_x1000 = 0;
+    Track_SlopeValid = 0;
+
+    LineLostCount = 0;
+    LineLostFlag = 0;
+    VisionStopFlag = 0;
+}
+
+void Camera_RequestRuntimeReset(void)
+{
+    vision_runtime_reset_request = 1;
+}
+
+uint8 Camera_RuntimeResetPending(void)
+{
+    return vision_runtime_reset_request;
+}
 
 IFX_INTERRUPT(exti_ch3_ch7_isr, 0, EXTI_CH3_CH7_INT_PRIO)
 {
@@ -2737,8 +2778,15 @@ uint8 Image_Process(void)
     if (mt9v03x_finish_flag == 1)                         //如果一帧图像采集完了，那么就可以对这副图像进行处理了。摄像头完成一帧 ->二值化
 
     {
+          VisionFrameSequence++;
           image_processing = 1;
           mt9v03x_finish_flag = 0;
+
+          if (1 == vision_runtime_reset_request)
+          {
+              vision_runtime_reset_request = 2;
+              Camera_ClearRuntimeState();
+          }
 //        camera_send_image(DEBUG_UART_INDEX, (const uint8 *)Pixle, (LCDH*LCDW));      //上位机显示
 //        usar_image((const uint8 *)Pixle,(LCDH*LCDW));//串口图传
           memset(ImageDeal, 0, sizeof(ImageDeal));
@@ -2778,9 +2826,13 @@ uint8 Image_Process(void)
 
 
           image_processing = 0;
+          VisionFrameSequence++;
+          if (2 == vision_runtime_reset_request)
+          {
+              vision_runtime_reset_request = 0;
+          }
           return 1;
     }
 
     return 0;
 }
-
