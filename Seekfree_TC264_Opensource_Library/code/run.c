@@ -82,6 +82,9 @@ static seekfree_assistant_camera_boundary_struct wifi_mid_information;
 #define SPEED_HIGH (120) // 高速
 #define LOST_STEER_RECENTER_STEP (2.0)
 
+// ------------------ 方向环输出映射参数 ------------------
+#define STEER_OUTPUT_MAP_SCALE (0.8) // 映射比例：PID 原始输出乘以该系数
+
 // ------------------ 运行状态与控制器 ------------------
 volatile int16 raw_left = 0;
 volatile int16 raw_right = 0;
@@ -281,8 +284,8 @@ void run_init(void)
     PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 1, 0.1, 0.0, 3000, -3000, 0, 0);
     PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 1, 0.1, 0.0, 3000, -3000, 0, 0);
 
-    // 转向位置环
-    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 0.3, 0.0, 0.1, 20, -20, 0, 0);
+    // 转向位置环：当前只使用横向误差 PID
+    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 0.45, 0.0, 0.1, 40, -40, 0, 0);
 
     // 编码器平均滤波初始化
     filter_ring_init(&encoder_left_ring, encoder_left_buffer, ENCODER_FILTER_WINDOW);
@@ -450,7 +453,9 @@ double run_get_gap(void)
         {
             PID_Controller_Reset(&pid_gap);
         }
+        // 保留方向 PID 原始输出，后轮差速直接使用该值
         held_gap = PID_Controller_Calc(&pid_gap, 0, (double)ControlMidError);
+
         previous_lost_count = 0;
         return held_gap;
     }
@@ -517,10 +522,10 @@ void run_direct(int16 speed, int16 gap)
     encoder_right = filter_rc_low_pass(&encoder_right_filter, encoder_right, 0.2);
     encoder_clear_count(ENCODER_2); // 清空编码器计数
 
-    int16 left_speed = (int16)PID_Controller_Calc(&pid_left, speed, encoder_left);
-    int16 right_speed = (int16)PID_Controller_Calc(&pid_right, speed, encoder_right);
+    int16 left_speed = (int16)PID_Controller_Calc(&pid_left, speed + gap, encoder_left);
+    int16 right_speed = (int16)PID_Controller_Calc(&pid_right, speed - gap, encoder_right);
 
-    // 左右轮当前使用同一目标速度；gap 由舵机转向环使用，暂未参与后轮差速
+    // 舵机和后轮差速共同转向，提高入弯速度和弯中跟随能力
     run_motor_left_speed(left_speed);
     run_motor_right_speed(right_speed);
 }
@@ -550,8 +555,8 @@ IFX_INTERRUPT(cc60_pit_ch0_isr, 0, CCU6_0_CH0_ISR_PRIORITY)
     }
 
     gap = run_get_gap();
-    run_direct(speed, (int16)gap); // 执行左右轮速度闭环
-    run_servo_motor_angle((int8)gap);
+    run_direct(speed, (int16)gap);                               // 后轮差速直接使用 PID 原始输出
+    run_servo_motor_angle((int8)(gap * STEER_OUTPUT_MAP_SCALE)); // 舵机使用映射后的 -20 ～ +20
 }
 
 // 10ms 辅助中断：只扫描按键并产生低频任务标志，不做屏幕绘制和图传
