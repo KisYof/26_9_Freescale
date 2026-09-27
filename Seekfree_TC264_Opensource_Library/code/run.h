@@ -5,6 +5,7 @@
 
 void run_init(void);
 void run_while(void);
+void run_uart2_rx_isr(void);
 void run_motor_left_speed(int16 speed);
 void run_motor_right_speed(int16 speed);
 void run_servo_motor_angle(int8 angle);

@@ -3,6 +3,13 @@
 #include "filter.h"
 #include "camera.h"
 #include "run_ui.h"
+#include "uart_cmd.h"
+
+// ------------------ PID 调试串口 ------------------
+#define PID_DEBUG_UART        (UART_2)
+#define PID_DEBUG_UART_BAUD   (115200U)
+#define PID_DEBUG_UART_TX_PIN (UART2_TX_P10_5)
+#define PID_DEBUG_UART_RX_PIN (UART2_RX_P10_6)
 
 // ------------------ WiFi 图传配置 ------------------
 #define WIFI_IMAGE_SSID        "KY"
@@ -78,7 +85,7 @@ static seekfree_assistant_camera_boundary_struct wifi_mid_information;
 
 // ------------------ 速度决策参数 ------------------
 #define SPEED_LOW (50)   // 低速
-#define SPEED_MID (90)   // 中速
+#define SPEED_MID (70)   // 中速
 #define SPEED_HIGH (120) // 高速
 #define LOST_STEER_RECENTER_STEP (2.0)
 
@@ -91,9 +98,12 @@ volatile int16 raw_right = 0;
 volatile int16 encoder_left = 0;
 volatile int16 encoder_right = 0;
 int16 speed = SPEED_MID;
-uint8 uart_flag = 0;
+static int16 speed_setting = SPEED_MID;
+volatile uint8 uart_flag = 0;
 static volatile uint8 run_enabled = 0;
 static volatile uint8 run_start_pending = 0;
+static ucmd_ctx_t pid_debug_cmd;
+static char pid_debug_text[128];
 
 PID_Controller_t pid_left;
 PID_Controller_t pid_right;
@@ -112,8 +122,39 @@ static filter_rc_state_t encoder_right_filter;
 
 static void run_stop_outputs(void);
 static void run_request_start(void);
+static void pid_debug_uart_reply(const char *text);
+static void pid_debug_send(void);
 static void wifi_image_init(void);
 static void wifi_image_while(void);
+
+// uart_cmd 的统一发送回调
+static void pid_debug_uart_reply(const char *text)
+{
+    uart_write_string(PID_DEBUG_UART, text);
+}
+
+// 依次输出左电机、右电机、方向 PID 的 target、actual、output
+static void pid_debug_send(void)
+{
+    (void)snprintf(pid_debug_text, sizeof(pid_debug_text),
+                   "s:%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\r\n",
+                   pid_left.controller.inc.target,
+                   pid_left.controller.inc.actual,
+                   pid_left.controller.inc.output,
+                   pid_right.controller.inc.target,
+                   pid_right.controller.inc.actual,
+                   pid_right.controller.inc.output,
+                   pid_gap.controller.pos.target,
+                   pid_gap.controller.pos.actual,
+                   pid_gap.controller.pos.output);
+    ucmd_send_text(&pid_debug_cmd, pid_debug_text);
+}
+
+// UART2 接收中断只搬运字节，命令解析统一放在 CPU0 主循环执行
+void run_uart2_rx_isr(void)
+{
+    ucmd_isr_feed(&pid_debug_cmd);
+}
 
 // ------------------ WiFi 图传 ------------------
 
@@ -177,9 +218,7 @@ static void wifi_image_while(void)
 
     sequence_before = VisionFrameSequence;
     // 序号为奇数表示 CPU1 正在更新；相同序号表示本帧已经发送过
-    if ((0 == sequence_before)
-        || (sequence_before & 1U)
-        || (sequence_before == wifi_image_last_sequence))
+    if ((0 == sequence_before) || (sequence_before & 1U) || (sequence_before == wifi_image_last_sequence))
     {
         return;
     }
@@ -264,6 +303,24 @@ static void wifi_image_while(void)
 // run 层总初始化函数，仅在 CPU0 上电初始化阶段调用一次
 void run_init(void)
 {
+    // UART2 硬件映射为 P10.5(TX)/P10.6(RX)，同时发送 PID 数据并接收调参命令
+    uart_init(PID_DEBUG_UART, PID_DEBUG_UART_BAUD,
+              PID_DEBUG_UART_TX_PIN, PID_DEBUG_UART_RX_PIN);
+    ucmd_init(&pid_debug_cmd, PID_DEBUG_UART, pid_debug_uart_reply);
+
+    // 紧凑调参命令：spd10、lkp1.2、rki0.1、dkd0.05，以回车或换行结束
+    (void)ucmd_reg_int16(&pid_debug_cmd, "spd", &speed_setting);
+    (void)ucmd_reg_double(&pid_debug_cmd, "lkp", &pid_left.controller.inc.Kp);
+    (void)ucmd_reg_double(&pid_debug_cmd, "lki", &pid_left.controller.inc.Ki);
+    (void)ucmd_reg_double(&pid_debug_cmd, "lkd", &pid_left.controller.inc.Kd);
+    (void)ucmd_reg_double(&pid_debug_cmd, "rkp", &pid_right.controller.inc.Kp);
+    (void)ucmd_reg_double(&pid_debug_cmd, "rki", &pid_right.controller.inc.Ki);
+    (void)ucmd_reg_double(&pid_debug_cmd, "rkd", &pid_right.controller.inc.Kd);
+    (void)ucmd_reg_double(&pid_debug_cmd, "dkp", &pid_gap.controller.pos.Kp);
+    (void)ucmd_reg_double(&pid_debug_cmd, "dki", &pid_gap.controller.pos.Ki);
+    (void)ucmd_reg_double(&pid_debug_cmd, "dkd", &pid_gap.controller.pos.Kd);
+    uart_rx_interrupt(PID_DEBUG_UART, 1);
+
     // 图传初始化放在定时控制中断启动之前，连接等待不会阻塞车辆控制
     wifi_image_init();
 
@@ -309,6 +366,9 @@ void run_init(void)
 // CPU0 主循环调用函数，不执行电机闭环，避免图传和界面处理改变控制周期
 void run_while(void)
 {
+    // 中断只收字节；完整命令在主循环中解析并原子更新对应参数
+    ucmd_poll(&pid_debug_cmd);
+
     // 界面层只返回一次性 KEY1 发车事件，具体清状态流程由 run 层完成
     if (run_ui_while(run_enabled, &pid_left, &pid_right, &pid_gap))
     {
@@ -316,11 +376,7 @@ void run_while(void)
     }
 
     // KEY1 先请求 CPU1 清空视觉状态；复位完成且控制中线有效后才真正发车
-    if (run_start_pending
-        && !Camera_RuntimeResetPending()
-        && ControlMidValid
-        && !VisionStopFlag
-        && !ImageFlag.Stop)
+    if (run_start_pending && !Camera_RuntimeResetPending() && ControlMidValid && !VisionStopFlag && !ImageFlag.Stop)
     {
         uint32 interrupt_state = interrupt_global_disable();
         run_start_pending = 0;
@@ -330,12 +386,8 @@ void run_while(void)
 
     if (uart_flag == 1)
     {
-        // 10ms 调试输出节拍；默认关闭 printf，避免串口输出占用主循环
         uart_flag = 0;
-        // printf("Speed: %d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n",
-        //        raw_left, raw_right, encoder_left, encoder_right,
-        //        speed, (int)ControlMidError, ControlMidValid,
-        //        LineLostFlag, VisionStopFlag, run_enabled);
+        pid_debug_send();
     }
 
     // 图传位于主循环末尾，即使发送等待，5ms 控制中断仍可抢占执行
@@ -377,7 +429,7 @@ static void run_request_start(void)
     raw_right = 0;
     encoder_left = 0;
     encoder_right = 0;
-    speed = SPEED_MID;
+    speed = speed_setting;
 
     // CPU1 在下一帧图像处理中完成复位；run_while() 收到完成状态后才置运行标志
     Camera_RequestRuntimeReset();
@@ -495,11 +547,11 @@ void run_speed_decision(void)
     else if (ImageFlag.Zebra_Flag == 1 || LineLostFlag)
     {
         // 斑马线与丢线阶段降速，不在此处直接切断运行状态
-        speed = SPEED_LOW;
+        speed = (speed_setting < SPEED_LOW) ? speed_setting : SPEED_LOW;
     }
     else
     {
-        speed = SPEED_MID;
+        speed = speed_setting;
     }
 }
 
@@ -567,4 +619,14 @@ IFX_INTERRUPT(cc60_pit_ch1_isr, 0, CCU6_0_CH1_ISR_PRIORITY)
 
     run_ui_tick_10ms();
     uart_flag = 1; // 设置标志位，表示可以打印数据
+}
+
+IFX_INTERRUPT(uart2_rx_isr, 0, UART2_RX_INT_PRIO)
+{
+    interrupt_global_enable(0);                     // 开启中断嵌套
+    // wireless_module_uart_handler();              // 无线模块统一回调函数
+    run_uart2_rx_isr();                             // PID 调参串口：仅搬运字节到命令 FIFO
+
+
+
 }

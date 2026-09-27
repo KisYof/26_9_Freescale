@@ -35,6 +35,7 @@
 
 #include "isr_config.h"
 #include "isr.h"
+#include "run.h"
 
 // 对于TC系列默认是不支持中断嵌套的，希望支持中断嵌套需要在中断内使用 interrupt_global_enable(0); 来开启中断嵌套
 // 简单点说实际上进入中断后TC系列的硬件自动调用了 interrupt_global_disable(); 来拒绝响应任何的中断，因此需要我们自己手动调用 interrupt_global_enable(0); 来开启中断的响应。
@@ -207,14 +208,14 @@ IFX_INTERRUPT(uart2_tx_isr, 0, UART2_TX_INT_PRIO)
 
 }
 
-IFX_INTERRUPT(uart2_rx_isr, 0, UART2_RX_INT_PRIO)
-{
-    interrupt_global_enable(0);                     // 开启中断嵌套
-    wireless_module_uart_handler();                 // 无线模块统一回调函数
+// IFX_INTERRUPT(uart2_rx_isr, 0, UART2_RX_INT_PRIO)
+// {
+//     interrupt_global_enable(0);                     // 开启中断嵌套
+//     wireless_module_uart_handler();                 // 无线模块统一回调函数
 
 
 
-}
+// }
 // 串口3默认连接到GPS定位模块
 IFX_INTERRUPT(uart3_tx_isr, 0, UART3_TX_INT_PRIO)
 {
