@@ -1060,7 +1060,10 @@ void Flag_init(void)
  * @parameter      void
  * @return         void
  *------------------------------------------------------------------------------------------------------------------*/
-
+#define NORMAL_MID_EDGE_MARGIN     2
+#define NORMAL_MID_MIN_WIDTH       20
+#define NORMAL_MID_MAX_WIDTH       140
+#define NORMAL_MID_FAR_DIFF_LIMIT  40
 void NormalMid_Update(void)
 {
     int i;
@@ -1083,6 +1086,8 @@ void NormalMid_Update(void)
     /* 近端和远端的平均中线值 */
     int near_value = 0;
     int far_value = 0;
+
+    int far_diff;
 
     NormalMidValid = 0;
     NormalMidValue = ImageSensorMid;
@@ -1125,11 +1130,14 @@ void NormalMid_Update(void)
         int wide = right - left;
         int center = (left + right) / 2;
 
-        if (left >= 0 && left < LCDW &&
-            right >= 0 && right < LCDW &&
+        // 排除贴到图像边缘的假边界
+        if (left > NORMAL_MID_EDGE_MARGIN &&
+            right < LCDW - NORMAL_MID_EDGE_MARGIN &&
             right > left &&
-            wide >= 20 &&
-            center >= 0 && center < LCDW)
+            wide >= NORMAL_MID_MIN_WIDTH &&
+            wide <= NORMAL_MID_MAX_WIDTH &&
+            center >= 0 &&
+            center < LCDW)
         {
             NormalMidLine[i] = center;
         }
@@ -1147,8 +1155,18 @@ void NormalMid_Update(void)
             near_cnt++;
         }
     }
+    // 底部5行至少要有3行有效
+    if (near_cnt < 3)
+    {
+        NormalMidValid = 0;
+        NormalMidError = 0;
+        return;
+    }
+
+    near_value = near_sum / near_cnt;
+
     /* 3. 计算远端中线
-     * 使用前瞻行附近的3行，让控制提前感知前方弯道
+    远端取前瞻附近5行
      */
     far_start = Prospect_line;
     far_end = Prospect_line + 2;
@@ -1157,6 +1175,12 @@ void NormalMid_Update(void)
     {
         far_end = LCDH - 1;
     }
+
+    if (far_start < 0)
+    {
+        far_start = 0;
+    }
+
 
     if (ImageStatus.OFFLine < far_start)
     {
@@ -1170,30 +1194,56 @@ void NormalMid_Update(void)
         }
     }
 
-    /* 4. 近端和远端加权，得到最终正常中线 */
-    // 底部5行至少要有3行有效
-    if (near_cnt >= 3)
+    // /* 4. 近端和远端加权，得到最终正常中线 */
+    // // 底部5行至少要有3行有效
+    // if (near_cnt >= 3)
+    // {
+    //     near_value = near_sum / near_cnt;
+
+    //     if (far_cnt > 0)
+    //     {
+    //         far_value = far_sum / far_cnt;
+    //         NormalMidValue = (7 * near_value + 3 * far_value) / 10;
+    //     }
+    //     else
+    //     {
+    //         NormalMidValue = near_value;
+    //     }
+
+    //     NormalMidError = ImageSensorMid - NormalMidValue;
+    //     NormalMidValid = 1;
+    // }
+    // else
+    // {
+    //     NormalMidValid = 0;
+    //     NormalMidError = 0;
+    // }
+    if (far_cnt >= 3)
     {
-        near_value = near_sum / near_cnt;
+        far_value = far_sum / far_cnt;
 
-        if (far_cnt > 0)
+        // 限制远端对近端的影响，防止中线突然飘
+        far_diff = far_value - near_value;
+
+        if (far_diff > NORMAL_MID_FAR_DIFF_LIMIT)
         {
-            far_value = far_sum / far_cnt;
-            NormalMidValue = (7 * near_value + 3 * far_value) / 10;
+            far_diff = NORMAL_MID_FAR_DIFF_LIMIT;
         }
-        else
+        else if (far_diff < -NORMAL_MID_FAR_DIFF_LIMIT)
         {
-            NormalMidValue = near_value;
+            far_diff = -NORMAL_MID_FAR_DIFF_LIMIT;
         }
 
-        NormalMidError = ImageSensorMid - NormalMidValue;
-        NormalMidValid = 1;
+        NormalMidValue = near_value + (3 * far_diff) / 10;
     }
     else
     {
-        NormalMidValid = 0;
-        NormalMidError = 0;
+        NormalMidValue = near_value;
     }
+
+    NormalMidError = ImageSensorMid - NormalMidValue;
+    NormalMidValid = 1;
+    
 }
 /*------------------------------------------------------------------------------------------------------------------
  * @name           Track_Slope_Update
@@ -2604,34 +2654,51 @@ void ControlMid_Update(void)
     int far_start;
     int far_end;
 
+    uint8 element_active;
+
     ControlMidValid = 0;
     ControlMidError = 0;
 
+    element_active =
+        (ImageFlag.image_element_rings != 0) ||
+        (ImageFlag.Cross_Flag == 1) ||
+        (ImageFlag.Zebra_Flag == 1);
+
     for (i = 0; i < LCDH; i++)
     {
-        int center = ImageDeal[i].Center;
-        int left   = ImageDeal[i].LeftBorder;
-        int right  = ImageDeal[i].RightBorder;
-
-        /*
-         * 元素处理后的 Center 优先；
-         * 如果这一行元素处理没有修改，就退回正常中线。
-         */
-        if (center >= 0 && center < LCDW && right > left)
+        if (element_active == 0)
         {
-            ControlMidLine[i] = center;
-        }
-        else if (NormalMidLine[i] >= 0 && NormalMidLine[i] < LCDW)
-        {
+            // 没有元素时直接使用正常中线，避免 ImageDeal.Center 污染控制中线
             ControlMidLine[i] = NormalMidLine[i];
         }
         else
         {
-            ControlMidLine[i] = -1;
+            int center = ImageDeal[i].Center;
+            int left   = ImageDeal[i].LeftBorder;
+            int right  = ImageDeal[i].RightBorder;
+            int wide   = right - left;
+
+            if (center >= 0 &&
+                center < LCDW &&
+                right > left &&
+                wide >= 8 &&
+                wide <= LCDW - 5)
+            {
+                ControlMidLine[i] = center;
+            }
+            else if (NormalMidLine[i] >= 0 &&
+                     NormalMidLine[i] < LCDW)
+            {
+                ControlMidLine[i] = NormalMidLine[i];
+            }
+            else
+            {
+                ControlMidLine[i] = -1;
+            }
         }
     }
 
-    /* 近端使用底部5行 */
+    // 近端
     for (i = LCDH - 5; i < LCDH; i++)
     {
         if (ControlMidLine[i] >= 0)
@@ -2641,7 +2708,16 @@ void ControlMid_Update(void)
         }
     }
 
-    /* 远端使用前瞻附近 */
+    if (near_cnt < 3)
+    {
+        ControlMidValid = 0;
+        ControlMidError = 0;
+        return;
+    }
+
+    near_value = near_sum / near_cnt;
+
+    // 远端
     far_start = Prospect_line;
     far_end   = Prospect_line + 2;
 
@@ -2662,29 +2738,18 @@ void ControlMid_Update(void)
         }
     }
 
-    /* 至少要有3行有效，才认为控制中线有效 */
-    if (near_cnt >= 3)
+    if (far_cnt > 0)
     {
-        near_value = near_sum / near_cnt;
-
-        if (far_cnt > 0)
-        {
-            far_value = far_sum / far_cnt;
-            ControlMidValue = (7 * near_value + 3 * far_value) / 10;
-        }
-        else
-        {
-            ControlMidValue = near_value;
-        }
-
-        ControlMidError = ImageSensorMid - ControlMidValue;
-        ControlMidValid = 1;
+        far_value = far_sum / far_cnt;
+        ControlMidValue = (7 * near_value + 3 * far_value) / 10;
     }
     else
     {
-        ControlMidValid = 0;
-        ControlMidError = 0;
+        ControlMidValue = near_value;
     }
+
+    ControlMidError = ImageSensorMid - ControlMidValue;
+    ControlMidValid = 1;
 }
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
 //  @name           LineLost_Protection_Update
