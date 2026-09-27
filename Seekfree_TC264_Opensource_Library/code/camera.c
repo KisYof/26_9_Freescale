@@ -1397,7 +1397,7 @@ void Search_Bottom_Line_OTSU(uint8 imageInput[LCDH][LCDW], uint8 Row, uint8 Col,
 //  @Author
 //  Sample usage:   Search_Left_and_Right_Lines(imageInput, Row, Col, Bottonline);
 //--------------------------------------------------------------------------------------------------------------------------------------------
-
+#define MAX_BOUNDARY_JUMP 12
 void Search_Left_and_Right_Lines(uint8 imageInput[LCDH][LCDW], uint8 Row, uint8 Col, uint8 Bottonline)
 {
     //定义小人的当前行走状态位置为 上 左 下 右 一次要求 上：左边为黑色 左：上边为褐色 下：右边为色  右：下面有黑色
@@ -2654,51 +2654,83 @@ void ControlMid_Update(void)
     int far_start;
     int far_end;
 
+    uint8 ring_active;
     uint8 element_active;
+
+    static int LastControlMidLine[LCDH] = {0};
 
     ControlMidValid = 0;
     ControlMidError = 0;
+
+    ring_active = (ImageFlag.image_element_rings != 0);
 
     element_active =
         (ImageFlag.image_element_rings != 0) ||
         (ImageFlag.Cross_Flag == 1) ||
         (ImageFlag.Zebra_Flag == 1);
 
+    /* 1. 生成每一行的控制中线 */
     for (i = 0; i < LCDH; i++)
     {
-        if (element_active == 0)
+        int center = ImageDeal[i].Center;
+        int left   = ImageDeal[i].LeftBorder;
+        int right  = ImageDeal[i].RightBorder;
+        int wide   = right - left;
+
+        /* 圆环状态下，优先相信圆环补线结果 */
+        if (ring_active &&
+            center > 2 &&
+            center < LCDW - 2)
         {
-            // 没有元素时直接使用正常中线，避免 ImageDeal.Center 污染控制中线
+            ControlMidLine[i] = center;
+        }
+        /* 普通元素或正常赛道，检查左右边线和宽度 */
+        else if (center >= 0 &&
+                 center < LCDW &&
+                 right > left &&
+                 wide >= 8 &&
+                 wide <= LCDW - 5)
+        {
+            ControlMidLine[i] = center;
+        }
+        /* 元素没有修改的行，退回正常中线 */
+        else if (NormalMidLine[i] >= 0 &&
+                 NormalMidLine[i] < LCDW)
+        {
             ControlMidLine[i] = NormalMidLine[i];
         }
         else
         {
-            int center = ImageDeal[i].Center;
-            int left   = ImageDeal[i].LeftBorder;
-            int right  = ImageDeal[i].RightBorder;
-            int wide   = right - left;
+            ControlMidLine[i] = -1;
+        }
+    }
 
-            if (center >= 0 &&
-                center < LCDW &&
-                right > left &&
-                wide >= 8 &&
-                wide <= LCDW - 5)
+    /* 2. 先补单行小洞 */
+    for (i = 1; i < LCDH - 1; i++)
+    {
+        if (ControlMidLine[i] < 0 &&
+            ControlMidLine[i - 1] >= 0 &&
+            ControlMidLine[i + 1] >= 0)
+        {
+            ControlMidLine[i] =
+                (ControlMidLine[i - 1] + ControlMidLine[i + 1]) / 2;
+        }
+    }
+
+    /* 3. 圆环状态允许短时间使用上一帧的中线 */
+    if (ring_active)
+    {
+        for (i = 0; i < LCDH; i++)
+        {
+            if (ControlMidLine[i] < 0 &&
+                LastControlMidLine[i] > 0)
             {
-                ControlMidLine[i] = center;
-            }
-            else if (NormalMidLine[i] >= 0 &&
-                     NormalMidLine[i] < LCDW)
-            {
-                ControlMidLine[i] = NormalMidLine[i];
-            }
-            else
-            {
-                ControlMidLine[i] = -1;
+                ControlMidLine[i] = LastControlMidLine[i];
             }
         }
     }
 
-    // 近端
+    /* 4. 计算近端 */
     for (i = LCDH - 5; i < LCDH; i++)
     {
         if (ControlMidLine[i] >= 0)
@@ -2717,7 +2749,7 @@ void ControlMid_Update(void)
 
     near_value = near_sum / near_cnt;
 
-    // 远端
+    /* 5. 计算远端 */
     far_start = Prospect_line;
     far_end   = Prospect_line + 2;
 
@@ -2750,6 +2782,12 @@ void ControlMid_Update(void)
 
     ControlMidError = ImageSensorMid - ControlMidValue;
     ControlMidValid = 1;
+
+    /* 6. 保存这一帧的控制中线 */
+    for (i = 0; i < LCDH; i++)
+    {
+        LastControlMidLine[i] = ControlMidLine[i];
+    }
 }
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
 //  @name           LineLost_Protection_Update
