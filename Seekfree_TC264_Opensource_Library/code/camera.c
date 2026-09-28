@@ -156,6 +156,28 @@ uint8 Half_Ring_Wide_small[LCDH]=
         51,51,52,52,53,53,54,54,55,55
 };
 
+#define VP_NORMAL             0
+#define VP_CROSS              1
+#define VP_ZEBRA              2
+#define VP_RING_ENTRY         3
+#define VP_RING_INSIDE        4
+#define VP_RING_INSIDE_BIG    5
+#define VP_RING_EXIT          6
+#define VP_COUNT              7
+//建立元素前瞻行参数表
+static const uint8 Vision_ProspectRow[VP_COUNT] =
+{
+    26,     // 普通赛道：看远一点
+    32,     // 十字：看中间
+    30,     // 斑马线
+    38,     // 圆环入口：看近一点
+    42,     // 圆环内部
+    45,     // 大圆环内部
+    32      // 圆环出口
+};
+
+uint8 ControlProspectType = VP_NORMAL;
+uint8 ControlProspectRow  = 26;
 
 /*其他*/
 #define LimitP_L(x) (x=((x>ImageStatus.OFFLine)?x:(ImageStatus.OFFLine+2)))//对图像的前瞻进行限制，不要超过扫线截止行（后续用动态前瞻控制行的时候那里限制，这里删掉）
@@ -2638,64 +2660,87 @@ void Element_Handle_Right_Rings()
 //  @Author
 //  Sample usage:   ControlMid_Update
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
+static uint8 Vision_SelectProspectType(void)
+{
+    /* 斑马线优先 */
+    if (ImageFlag.Zebra_Flag == 1)
+    {
+        return VP_ZEBRA;
+    }
+
+    /* 圆环 */
+    if (ImageFlag.image_element_rings != 0)
+    {
+        if (ImageFlag.image_element_rings_flag <= 2)
+        {
+            return VP_RING_ENTRY;
+        }
+
+        if (ImageFlag.image_element_rings_flag >= 8)
+        {
+            return VP_RING_EXIT;
+        }
+
+        if (ImageFlag.ring_big_small == 2)
+        {
+            return VP_RING_INSIDE_BIG;
+        }
+
+        return VP_RING_INSIDE;
+    }
+
+    /* 十字 */
+    if (ImageFlag.Cross_Flag == 1)
+    {
+        return VP_CROSS;
+    }
+
+    return VP_NORMAL;
+}
 void ControlMid_Update(void)
 {
     int i;
-
-    int near_sum = 0;
-    int near_cnt = 0;
-
-    int far_sum = 0;
-    int far_cnt = 0;
-
-    int near_value = 0;
-    int far_value = 0;
-
-    int far_start;
-    int far_end;
+    int start;
+    int end;
+    int sum;
+    int cnt;
+    int center;
+    int left;
+    int right;
+    int wide;
 
     uint8 ring_active;
-    uint8 element_active;
-
-    static int LastControlMidLine[LCDH] = {0};
 
     ControlMidValid = 0;
     ControlMidError = 0;
 
     ring_active = (ImageFlag.image_element_rings != 0);
 
-    element_active =
-        (ImageFlag.image_element_rings != 0) ||
-        (ImageFlag.Cross_Flag == 1) ||
-        (ImageFlag.Zebra_Flag == 1);
-
-    /* 1. 生成每一行的控制中线 */
+    /* 1. 先生成每一行的控制中线 */
     for (i = 0; i < LCDH; i++)
     {
-        int center = ImageDeal[i].Center;
-        int left   = ImageDeal[i].LeftBorder;
-        int right  = ImageDeal[i].RightBorder;
-        int wide   = right - left;
+        center = ImageDeal[i].Center;
+        left   = ImageDeal[i].LeftBorder;
+        right  = ImageDeal[i].RightBorder;
+        wide   = right - left;
 
-        /* 圆环状态下，优先相信圆环补线结果 */
         if (ring_active &&
             center > 2 &&
             center < LCDW - 2)
         {
+            /* 圆环状态下优先相信元素补线 */
             ControlMidLine[i] = center;
         }
-        /* 普通元素或正常赛道，检查左右边线和宽度 */
-        else if (center >= 0 &&
-                 center < LCDW &&
+        else if (center > 2 &&
+                 center < LCDW - 2 &&
                  right > left &&
                  wide >= 8 &&
                  wide <= LCDW - 5)
         {
             ControlMidLine[i] = center;
         }
-        /* 元素没有修改的行，退回正常中线 */
-        else if (NormalMidLine[i] >= 0 &&
-                 NormalMidLine[i] < LCDW)
+        else if (NormalMidLine[i] > 2 &&
+                 NormalMidLine[i] < LCDW - 2)
         {
             ControlMidLine[i] = NormalMidLine[i];
         }
@@ -2705,88 +2750,78 @@ void ControlMid_Update(void)
         }
     }
 
-    /* 2. 先补单行小洞 */
-    for (i = 1; i < LCDH - 1; i++)
+    /* 2. 根据元素状态选择控制行 */
+    ControlProspectType = Vision_SelectProspectType();
+    ControlProspectRow  = Vision_ProspectRow[ControlProspectType];
+
+    if (ControlProspectRow >= LCDH)
     {
-        if (ControlMidLine[i] < 0 &&
-            ControlMidLine[i - 1] >= 0 &&
-            ControlMidLine[i + 1] >= 0)
-        {
-            ControlMidLine[i] =
-                (ControlMidLine[i - 1] + ControlMidLine[i + 1]) / 2;
-        }
+        ControlProspectRow = LCDH - 1;
     }
 
-    /* 3. 圆环状态允许短时间使用上一帧的中线 */
-    if (ring_active)
+    /* 3. 先取控制行附近三行 */
+    start = (int)ControlProspectRow - 1;
+    end   = (int)ControlProspectRow + 1;
+
+    if (start < 0)
     {
-        for (i = 0; i < LCDH; i++)
-        {
-            if (ControlMidLine[i] < 0 &&
-                LastControlMidLine[i] > 0)
-            {
-                ControlMidLine[i] = LastControlMidLine[i];
-            }
-        }
+        start = 0;
     }
 
-    /* 4. 计算近端 */
-    for (i = LCDH - 5; i < LCDH; i++)
+    if (end >= LCDH)
+    {
+        end = LCDH - 1;
+    }
+
+    sum = 0;
+    cnt = 0;
+
+    for (i = start; i <= end; i++)
     {
         if (ControlMidLine[i] >= 0)
         {
-            near_sum += ControlMidLine[i];
-            near_cnt++;
+            sum += ControlMidLine[i];
+            cnt++;
         }
     }
 
-    if (near_cnt < 3)
+    /* 4. 附近不够，再扩大到上下5行 */
+    if (cnt == 0)
     {
-        ControlMidValid = 0;
-        ControlMidError = 0;
-        return;
-    }
+        start = (int)ControlProspectRow - 5;
+        end   = (int)ControlProspectRow + 5;
 
-    near_value = near_sum / near_cnt;
+        if (start < 0)
+        {
+            start = 0;
+        }
 
-    /* 5. 计算远端 */
-    far_start = Prospect_line;
-    far_end   = Prospect_line + 2;
+        if (end >= LCDH)
+        {
+            end = LCDH - 1;
+        }
 
-    if (far_end >= LCDH)
-    {
-        far_end = LCDH - 1;
-    }
-
-    if (ImageStatus.OFFLine < far_start)
-    {
-        for (i = far_start; i <= far_end; i++)
+        for (i = start; i <= end; i++)
         {
             if (ControlMidLine[i] >= 0)
             {
-                far_sum += ControlMidLine[i];
-                far_cnt++;
+                sum += ControlMidLine[i];
+                cnt++;
             }
         }
     }
 
-    if (far_cnt > 0)
+    if (cnt > 0)
     {
-        far_value = far_sum / far_cnt;
-        ControlMidValue = (7 * near_value + 3 * far_value) / 10;
+        ControlMidValue = sum / cnt;
+        ControlMidError = ImageSensorMid - ControlMidValue;
+        ControlMidValid = 1;
     }
     else
     {
-        ControlMidValue = near_value;
-    }
-
-    ControlMidError = ImageSensorMid - ControlMidValue;
-    ControlMidValid = 1;
-
-    /* 6. 保存这一帧的控制中线 */
-    for (i = 0; i < LCDH; i++)
-    {
-        LastControlMidLine[i] = ControlMidLine[i];
+        ControlMidValue = ImageSensorMid;
+        ControlMidError = 0;
+        ControlMidValid = 0;
     }
 }
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------

@@ -76,7 +76,8 @@ void LineLost_Protection_Update(void);
 void Camera_RequestRuntimeReset(void);
 uint8 Camera_RuntimeResetPending(void);
 
-
+extern uint8 ControlProspectType;
+extern uint8 ControlProspectRow;
 //每一行的属性
 typedef struct {
   //梯度扫线数据
