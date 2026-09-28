@@ -92,7 +92,7 @@ int Point_Xsite,Point_Ysite;                                    //拐点横纵坐标
 int Repair_Point_Xsite,Repair_Pont_Ysite;                      //补线点横纵坐标
 int Point_Ysite1;                                               //判断大小圆环时用的纵坐标
 int Black;                                                      //判断大小圆环时用的黑点数量
-int Less_Big_Small_Num;                                         //判断大小圆环时用的丢线
+int Less_Big_Small_Num;                                         //判断大小圆环时用的
 uint16 circle_num=0;                                            //判断圆环大小的计数器
 uint16 position=37;//正15 反38                                   //大环判断的阈值
 float Big_Small_Help_Gradient;                                  //大小圆环的辅助判断斜率
@@ -850,9 +850,9 @@ void Get_AllLine(void)
             }
 //        }
 
-        if (R_found_point >8)                                                   //限制车不在丢线太近或者太远进行斜率计算，适合得位置进行计算/zwf
+        if (R_found_point >8)                                                   //限制车不在太近或者太远进行斜率计算，适合得位置进行计算/zwf
         {
-          D_R = ((float)(ImageDeal[ytemp_W_R + R_found_point].RightBorder - ImageDeal[ytemp_W_R + 3].RightBorder)) /((float)(R_found_point - 3));//丢线记录在Ysite+2位置，所以这里是3？
+          D_R = ((float)(ImageDeal[ytemp_W_R + R_found_point].RightBorder - ImageDeal[ytemp_W_R + 3].RightBorder)) /((float)(R_found_point - 3));//记录在Ysite+2位置，所以这里是3？
           if (D_R > 0/*&&Straight_Judge(2,ytemp_W_R,ytemp_W_R+8)<3*/)
           {
             R_Found_T ='T';
@@ -988,11 +988,11 @@ void Get_AllLine(void)
 //      }
      if (ImageDeal[Ysite].IsLeftFind == 'W'&&Ysite<LCDH-5)
      {
-          ImageStatus.Miss_Left_lines++;//左丢线数
+          ImageStatus.Miss_Left_lines++;//左数
      }
      if (ImageDeal[Ysite].IsRightFind == 'W'&&Ysite<LCDH-5)
      {
-          ImageStatus.Miss_Right_lines++;//右丢线数
+          ImageStatus.Miss_Right_lines++;//右数
      }
 
       LimitL(ImageDeal[Ysite].LeftBorder);//限幅
@@ -1857,7 +1857,7 @@ void Straight_long_handle(void)                                  //返回结果小于1
         {
             ImageFlag.straight_long = 0;
             BeeOff;
-            //左边线不直了或右边线不直了或一侧出现明显丢线    → 不再是长直道   → 关闭蜂鸣器
+            //左边线不直了或右边线不直了或一侧出现明显    → 不再是长直道   → 关闭蜂鸣器
         }
     }
 }
@@ -2079,12 +2079,12 @@ float Cross_white_line=10;
 
 void Element_Judgement_Cross()
 {
-    //每帧先清标志 默认当前没有十字  左右丢线计数先清零
+    //每帧先清标志 默认当前没有十字  左右计数先清零
     ImageFlag.Cross_Flag=0;
     ImageStatus.Cross_Miss_Left_lines=0;
     ImageStatus.Cross_Miss_Right_lines=0;
 
-    //统计左右丢线 从第 40 行开始，一直往上看，统计左/右边线找不到的行数
+    //统计左右 从第 40 行开始，一直往上看，统计左/右边线找不到的行数
     for(int ysite=40;ysite>ImageStatus.OFFLine+1;ysite--)
     {
         if(ImageDeal[ysite].IsLeftFind=='W')//这一行左边线搜索异常，或者没有找到左边线
@@ -2183,7 +2183,7 @@ void Element_Judgement_Left_Rings()
     }
 
     //最终确认条件：1.Point2 明显在 Point1 上面,并且 Ring_Help_Flag = 1
-    //2.右边线基本正常 左边线丢失超过20行 顶部扫描截止行较小 中线误差较小(说明左侧大面积丢线，但车还在正常赛道方向，也可能是左环岛入口。)
+    //2.右边线基本正常 左边线丢失超过20行 顶部扫描截止行较小 中线误差较小(说明左侧大面积，但车还在正常赛道方向，也可能是左环岛入口。)
 
     /*if ((Left_RingsFlag_Point2_Ysite > Left_RingsFlag_Point1_Ysite+3 && Ring_Help_Flag == 1)
             ||(ImageStatus.Miss_Right_lines<3&&ImageStatus.Miss_Left_lines>20&&ImageStatus.OFFLine < 10&&ImageStatus.Det_True<10))*/
@@ -2339,7 +2339,7 @@ void Element_Handle_Left_Rings()
              && ImageStatus.Miss_Right_lines < 8
              && ImageStatus.OFFLine < 10)                            //右边为直线且截止行（前瞻值）很小
         {
-            ImageFlag.image_element_rings_flag = 9;//右边线重新变直，右丢线减少，图像扫描截止行也正常，就进入状态9
+            ImageFlag.image_element_rings_flag = 9;//右边线重新变直，右减少，图像扫描截止行也正常，就进入状态9
         }
     }
     //结束圆环进程
@@ -2829,10 +2829,10 @@ void ControlMid_Update(void)
 //  @brief
 //  @parameter      void
 //  @note           每帧检查 ControlMidValid → 连续无效则增加 LineLostCount → 达到阈值后设置 LineLostFlag
-//  @note           → 严重丢线后设置 VisionStopFlag → ControlMidValid 恢复后清零计数
+//  @note           → 严重后设置 VisionStopFlag → ControlMidValid 恢复后清零计数
 //  @time
 //  @Author
-//  Sample usage:   丢线保护
+//  Sample usage:   保护
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
 //丢线保护状态量：
 volatile uint8 LineLostCount = 0;
@@ -2852,12 +2852,12 @@ void LineLost_Protection_Update(void)
         LineLostCount++;
     }
 
-    if (LineLostCount >= 3)//连续 3 帧没有有效控制中线时
+    if (LineLostCount >= 5)//连续 5 帧没有有效控制中线时
     {
         LineLostFlag = 1;// LineLostFlag标志位置1 控制组看到它以后可以减速
     }
 
-    if (LineLostCount >= 10)//连续 10 帧无效
+    if (LineLostCount >= 30)//连续 30 帧无效
     {
         VisionStopFlag = 1;//VisionStopFlag置1 控制组看到它以后可以停车
     }
@@ -2950,7 +2950,7 @@ uint8 Image_Process(void)
 
           //
           ControlMid_Update();
-          //丢线保护计算
+          //保护计算
           LineLost_Protection_Update();
 
           // 计算轨道斜率
