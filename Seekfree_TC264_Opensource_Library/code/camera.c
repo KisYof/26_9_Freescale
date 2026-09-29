@@ -2910,28 +2910,61 @@ void ControlMid_Update(void)
 volatile uint8 LineLostCount = 0;
 volatile uint8 LineLostFlag  = 0;
 volatile uint8 VisionStopFlag = 0;
+volatile uint8 ElementLostCount = 0;
+#define LINE_LOST_SLOW_FRAMES       3
+#define LINE_LOST_STOP_FRAMES       30
+#define ELEMENT_LOST_STOP_FRAMES    60
+
 void LineLost_Protection_Update(void)
 {
-    if (ControlMidValid)//若ControlMidValid = 1：LineLostCount 清零
+    uint8 element_active;
+
+    element_active =
+        (ImageFlag.image_element_rings != 0) ||
+        (ImageFlag.Cross_Flag == 1) ||
+        (ImageFlag.Zebra_Flag == 1);
+
+    if (ControlMidValid)
     {
         LineLostCount = 0;
-        LineLostFlag  = 0;
+        LineLostFlag = 0;
+        ElementLostCount = 0;
         return;
     }
+
+    /* 圆环、十字、斑马线期间不要按普通赛道丢线处理 */
+    if (element_active)
+    {
+        if (ElementLostCount < 255)
+        {
+            ElementLostCount++;
+        }
+
+        LineLostFlag = 0;   // 元素内不直接把普通丢线标志置1
+
+        if (ElementLostCount >= ELEMENT_LOST_STOP_FRAMES)
+        {
+            VisionStopFlag = 1;
+        }
+
+        return;
+    }
+
+    ElementLostCount = 0;
 
     if (LineLostCount < 255)
     {
         LineLostCount++;
     }
 
-    if (LineLostCount >= 5)//连续 5 帧没有有效控制中线时
+    if (LineLostCount >= LINE_LOST_SLOW_FRAMES)
     {
-        LineLostFlag = 1;// LineLostFlag标志位置1 控制组看到它以后可以减速
+        LineLostFlag = 1;
     }
 
-    if (LineLostCount >= 30)//连续 30 帧无效
+    if (LineLostCount >= LINE_LOST_STOP_FRAMES)
     {
-        VisionStopFlag = 1;//VisionStopFlag置1 控制组看到它以后可以停车
+        VisionStopFlag = 1;
     }
 }
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
