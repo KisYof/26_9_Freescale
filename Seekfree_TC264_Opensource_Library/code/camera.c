@@ -2299,7 +2299,7 @@ void Element_Handle_Left_Rings()
         ImageFlag.image_element_rings_flag = 5;//左边线丢失数明显减少，车已经进入环岛区域，状态5
     }
 
-            Small_Rings_HalfWide_Offset=25;
+            Small_Rings_HalfWide_Offset=30;
     //进环
     if(ImageFlag.image_element_rings_flag == 5 && ImageStatus.Miss_Right_lines>15)//
     {
@@ -2371,10 +2371,46 @@ void Element_Handle_Left_Rings()
         || ImageFlag.image_element_rings_flag == 3
         || ImageFlag.image_element_rings_flag == 4)
     {
+//        for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
+//        {
+//            ImageDeal[Ysite].Center = ImageDeal[Ysite].RightBorder - Half_Road_Wide[Ysite];
+//        }
         for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
-        {
-            ImageDeal[Ysite].Center = ImageDeal[Ysite].RightBorder - Half_Road_Wide[Ysite];
-        }
+           {
+               int left  = ImageDeal[Ysite].LeftBorder;
+               int right = ImageDeal[Ysite].RightBorder;
+               int wide  = right - left;
+               int center;
+
+               /* 左右边界都有效，先用正常中线 */
+               if (left > 2 &&
+                   right < LCDW - 2 &&
+                   wide >= 20 &&
+                   wide <= 140)
+               {
+                   center = (left + right) / 2;
+               }
+               /* 只剩右边线，用右边界往左推 */
+               else if (right > 2 && right < LCDW - 2)
+               {
+                   center = right - Half_Road_Wide[Ysite];
+               }
+               /* 只剩左边线，用左边界往右推 */
+               else if (left > 2 && left < LCDW - 2)
+               {
+                   center = left + Half_Road_Wide[Ysite];
+               }
+               /* 两边都不好，保持上一行中点 */
+               else
+               {
+                   center = ImageDeal[Ysite].Center;
+               }
+
+               LimitL(center);
+               LimitH(center);
+
+               ImageDeal[Ysite].Center = center;
+           }
     }
 
     //进环  半宽处理
@@ -2491,7 +2527,7 @@ void Element_Handle_Right_Rings()
     //大小圆环判断
     if(ImageFlag.image_element_rings_flag == 5)
     {
-        Small_Rings_HalfWide_Offset=25;
+        Small_Rings_HalfWide_Offset=30;
     }
 //    进环
     if(ImageFlag.image_element_rings_flag == 5 && ImageStatus.Miss_Left_lines>15)
@@ -2574,10 +2610,46 @@ void Element_Handle_Right_Rings()
         || ImageFlag.image_element_rings_flag == 3
         || ImageFlag.image_element_rings_flag == 4)
     {
-        for (int Ysite = 59; Ysite > ImageStatus.OFFLine; Ysite--)
-        {
-            ImageDeal[Ysite].Center = ImageDeal[Ysite].LeftBorder + Half_Road_Wide[Ysite];
-        }
+//        for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
+//        {
+//            ImageDeal[Ysite].Center = ImageDeal[Ysite].LeftBorder + Half_Road_Wide[Ysite];
+//        }
+        for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
+            {
+                int left  = ImageDeal[Ysite].LeftBorder;
+                int right = ImageDeal[Ysite].RightBorder;
+                int wide  = right - left;
+                int center;
+
+                /* 两边都有效时，先使用正常左右边界中线 */
+                if (left > 2 &&
+                    right < LCDW - 2 &&
+                    wide >= 20 &&
+                    wide <= 140)
+                {
+                    center = (left + right) / 2;
+                }
+                /* 只剩右边线，说明左边丢失，用右边界往左推 */
+                else if (right > 2 && right < LCDW - 2)
+                {
+                    center = right - Half_Road_Wide[Ysite];
+                }
+                /* 只剩左边线，用左边界往右推 */
+                else if (left > 2 && left < LCDW - 2)
+                {
+                    center = left + Half_Road_Wide[Ysite];
+                }
+                /* 两边都不可靠，保持上一帧中点 */
+                else
+                {
+                    center = ImageDeal[Ysite].Center;
+                }
+
+                LimitL(center);
+                LimitH(center);
+
+                ImageDeal[Ysite].Center = center;
+            }
     }
 
     //进环  半宽处理
