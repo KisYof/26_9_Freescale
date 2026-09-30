@@ -63,8 +63,8 @@ static seekfree_assistant_camera_boundary_struct wifi_mid_information;
 #define SERVO_MOTOR_PWM (ATOM1_CH1_P33_9) // 定义主板上舵机对应引脚
 #define SERVO_MOTOR_FREQ (50)             // 定义主板上舵机频率  请务必注意范围 50-300
 
-#define SERVO_MOTOR_L_MAX (70) // 定义主板上舵机活动范围 角度
-#define SERVO_MOTOR_R_MAX (110)
+#define SERVO_MOTOR_L_MAX (78) // 定义主板上舵机活动范围 角度
+#define SERVO_MOTOR_R_MAX (102)
 
 // ------------------ 舵机占空比计算方式 ------------------
 //
@@ -469,7 +469,7 @@ void run_motor_right_speed(int16 duty)
     }
 }
 
-// angle：正值右转，负值左转，输入范围为（-20~20）度
+// angle：正值右转，负值左转，输入范围为（12~12）度
 void run_servo_motor_angle(int16 angle)
 {
     if (90 - angle < SERVO_MOTOR_L_MAX)
@@ -608,7 +608,7 @@ IFX_INTERRUPT(cc60_pit_ch0_isr, 0, CCU6_0_CH0_ISR_PRIORITY)
 
     gap = run_get_gap();
     run_direct(speed, (int16)gap);                               // 后轮差速直接使用 PID 原始输出
-    run_servo_motor_angle((int8)(gap * STEER_OUTPUT_MAP_SCALE)); // 舵机使用映射后的 -20 ～ +20
+    run_servo_motor_angle((int16)(gap * STEER_OUTPUT_MAP_SCALE)); // 舵机使用映射后的 -12 ～ +12
 }
 
 // 10ms 辅助中断：只扫描按键并产生低频任务标志，不做屏幕绘制和图传
