@@ -98,8 +98,8 @@ FSY,悬空不连接
 蓝牙串口,6pin排针
 设备,引脚/信号,备注
 STATE,悬空不连接,
-RXD,P14.1 (UART0 TX),
-TXD,P14.0 (UART0 RX),
+RXD,P10.5 (UART2 TX),
+TXD,P10.6 (UART2 RX),
 GND,GND,
 VCC(5V),5V,
 EN,悬空不连接,
