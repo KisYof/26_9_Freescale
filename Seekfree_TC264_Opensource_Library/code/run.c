@@ -470,7 +470,7 @@ void run_motor_right_speed(int16 duty)
 }
 
 // angle：正值右转，负值左转，输入范围为（-20~20）度
-void run_servo_motor_angle(int8 angle)
+void run_servo_motor_angle(int16 angle)
 {
     if (90 - angle < SERVO_MOTOR_L_MAX)
     {
