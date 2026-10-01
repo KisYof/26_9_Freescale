@@ -117,6 +117,7 @@ static uint8 wifi_pid_group = WIFI_PID_GROUP_LEFT;
 
 // ------------------ 方向环输出映射参数 ------------------
 #define STEER_OUTPUT_MAP_SCALE (0.8) // 映射比例：PID 原始输出乘以该系数
+#define STEER_INPUT_FILTER_ALPHA (0.2f) // 方向环输入一阶低通系数，越小滤波越强
 
 // ------------------ 运行状态与控制器 ------------------
 volatile int16 raw_left = 0;
@@ -149,6 +150,9 @@ static float encoder_right_buffer[ENCODER_FILTER_WINDOW];
 // 编码器 RC 低通滤波器
 static filter_rc_state_t encoder_left_filter;
 static filter_rc_state_t encoder_right_filter;
+
+// 方向环输入 RC 低通滤波器
+static filter_rc_state_t steer_input_filter;
 
 static void run_stop_outputs(void);
 static void run_request_start(void);
@@ -225,6 +229,7 @@ void run_init(void)
     // 编码器低通滤波滤波初始化
     filter_rc_state_reset(&encoder_left_filter);
     filter_rc_state_reset(&encoder_right_filter);
+    filter_rc_state_reset(&steer_input_filter);
 
     // WiFi 图传与 WiFi PID 调试共用模块和 TCP 连接
 #if (RUN_WIFI_IMAGE_ENABLE || RUN_WIFI_PID_DEBUG_ENABLE)
@@ -325,6 +330,9 @@ static void run_request_start(void)
     filter_ring_init(&encoder_right_ring, encoder_right_buffer, ENCODER_FILTER_WINDOW);
     filter_rc_state_reset(&encoder_left_filter);
     filter_rc_state_reset(&encoder_right_filter);
+
+    // 清空摄像头输入方向环RC低通滤波器
+    filter_rc_state_reset(&steer_input_filter);
 
     raw_left = 0;
     raw_right = 0;
