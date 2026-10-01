@@ -504,10 +504,10 @@ IFX_INTERRUPT(cc60_pit_ch0_isr, 0, CCU6_0_CH0_ISR_PRIORITY)
     // 根据运行状态和视觉标志更新目标速度
     run_speed_decision();
 
-    // 停车条件成立时立即撤销输出；视觉停车还会退出运行状态
-    if (!run_enabled || VisionStopFlag || ImageFlag.Stop)
+    // 未按键发车时保持无输出；运行中只有识别到斑马线才停车
+    if (!run_enabled || ImageFlag.Zebra_Flag)
     {
-        if (VisionStopFlag || ImageFlag.Stop)
+        if (ImageFlag.Zebra_Flag)
         {
             run_enabled = 0;
         }
