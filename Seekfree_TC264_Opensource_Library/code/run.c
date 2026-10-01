@@ -67,16 +67,6 @@ static seekfree_assistant_camera_boundary_struct wifi_mid_information;
 #define SERVO_MOTOR_R_MAX (102)
 
 // ------------------ 舵机占空比计算方式 ------------------
-//
-// 舵机对应的 0-180 活动角度对应 控制脉冲的 0.5ms-2.5ms 高电平
-//
-// 那么不同频率下的占空比计算方式就是
-// PWM_DUTY_MAX/(1000/freq)*(1+Angle/180) 在 50hz 时就是 PWM_DUTY_MAX/(1000/50)*(1+Angle/180)
-//
-// 那么 100hz 下 90度的打角 即高电平时间1.5ms 计算套用为
-// PWM_DUTY_MAX/(1000/100)*(1+90/180) = PWM_DUTY_MAX/10*1.5
-//
-// ------------------ 舵机占空比计算方式 ------------------
 #define SERVO_MOTOR_DUTY(x) ((float)PWM_DUTY_MAX / (1000.0 / (float)SERVO_MOTOR_FREQ) * (0.5 + (float)(x) / 90.0))
 
 #if (SERVO_MOTOR_FREQ < 50 || SERVO_MOTOR_FREQ > 300)
@@ -122,181 +112,11 @@ static filter_rc_state_t encoder_right_filter;
 
 static void run_stop_outputs(void);
 static void run_request_start(void);
+static void run_uart2_rx_isr(void);
 static void pid_debug_uart_reply(const char *text);
 static void pid_debug_send(void);
 static void wifi_image_init(void);
 static void wifi_image_while(void);
-
-// uart_cmd 的统一发送回调
-static void pid_debug_uart_reply(const char *text)
-{
-    uart_write_string(PID_DEBUG_UART, text);
-}
-
-// 依次输出左电机、右电机、方向 PID 的 target、actual、output
-static void pid_debug_send(void)
-{
-    (void)snprintf(pid_debug_text, sizeof(pid_debug_text),
-                   "s:%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\r\n",
-                   pid_left.controller.inc.target,
-                   pid_left.controller.inc.actual,
-                   pid_left.controller.inc.output,
-                   pid_right.controller.inc.target,
-                   pid_right.controller.inc.actual,
-                   pid_right.controller.inc.output,
-                   pid_gap.controller.pos.target,
-                   pid_gap.controller.pos.actual,
-                   pid_gap.controller.pos.output);
-    ucmd_send_text(&pid_debug_cmd, pid_debug_text);
-}
-
-// UART2 接收中断只搬运字节，命令解析统一放在 CPU0 主循环执行
-void run_uart2_rx_isr(void)
-{
-    ucmd_isr_feed(&pid_debug_cmd);
-}
-
-// ------------------ WiFi 图传 ------------------
-
-// 初始化 WiFi 模块、TCP 连接以及逐飞助手图像对象
-static void wifi_image_init(void)
-{
-    // 初始化阶段允许等待连接成功；车辆控制中断此时尚未启动
-    while (wifi_spi_init(WIFI_IMAGE_SSID, WIFI_IMAGE_PASSWORD))
-    {
-        printf("\r\n connect wifi failed.\r\n");
-        system_delay_ms(100);
-    }
-
-    if (1 != WIFI_SPI_AUTO_CONNECT)
-    {
-        // 未启用驱动自动连接时，主动连接上位机图像端口
-        while (wifi_spi_socket_connect(
-                    "TCP",
-                    WIFI_IMAGE_TARGET_IP,
-                    WIFI_IMAGE_TARGET_PORT,
-                    WIFI_IMAGE_LOCAL_PORT))
-        {
-            printf("\r\n connect image TCP server failed.\r\n");
-            system_delay_ms(100);
-        }
-    }
-
-    seekfree_assistant_interface_init(SEEKFREE_ASSISTANT_WIFI_SPI);
-
-    // 图像尺寸使用视觉算法处理后的 LCDW × LCDH，而不是摄像头原始尺寸
-    seekfree_assistant_camera_config(
-        &wifi_image_information,
-        SEEKFREE_ASSISTANT_CAMERA_TYPE_MT9V03X,
-        LCDW,
-        LCDH,
-        wifi_image_buffer[0]);
-
-    wifi_image_ready = 1;
-    printf("\r\n wifi image ready: version=%s, module=%s, server=%s:%s\r\n",
-        wifi_spi_version,
-        wifi_spi_ip_addr_port,
-        WIFI_IMAGE_TARGET_IP,
-        WIFI_IMAGE_TARGET_PORT);
-}
-
-// 在 CPU0 主循环中发送一帧稳定图像及其左右边线、控制中线
-static void wifi_image_while(void)
-{
-    uint32 sequence_before;
-    uint32 sequence_after;
-    uint16 left_count = 0;
-    uint16 right_count = 0;
-    uint16 mid_count = 0;
-    uint16 row;
-    int point_x;
-
-    if (!wifi_image_ready)
-    {
-        return;
-    }
-
-    sequence_before = VisionFrameSequence;
-    // 序号为奇数表示 CPU1 正在更新；相同序号表示本帧已经发送过
-    if ((0 == sequence_before) || (sequence_before & 1U) || (sequence_before == wifi_image_last_sequence))
-    {
-        return;
-    }
-
-    memcpy(wifi_image_buffer[0], Pixle[0], sizeof(wifi_image_buffer));
-
-    // 同一稳定帧内复制二值图、左右边线以及最终用于控制的中线
-    for (row = 0; row < LCDH; row++)
-    {
-        point_x = ImageDeal[row].LeftBorder;
-        if (ImageDeal[row].IsLeftFind && point_x >= 0 && point_x < LCDW)
-        {
-            wifi_left_boundary[left_count].x = (uint8)point_x;
-            wifi_left_boundary[left_count].y = (uint8)row;
-            left_count++;
-        }
-
-        point_x = ImageDeal[row].RightBorder;
-        if (ImageDeal[row].IsRightFind && point_x >= 0 && point_x < LCDW)
-        {
-            wifi_right_boundary[right_count].x = (uint8)point_x;
-            wifi_right_boundary[right_count].y = (uint8)row;
-            right_count++;
-        }
-
-        point_x = ControlMidLine[row];
-        if (point_x >= 0 && point_x < LCDW)
-        {
-            wifi_mid_boundary[mid_count].x = (uint8)point_x;
-            wifi_mid_boundary[mid_count].y = (uint8)row;
-            mid_count++;
-        }
-    }
-
-    sequence_after = VisionFrameSequence;
-    // 复制期间若 CPU1 开始处理下一帧，则丢弃本次快照，避免发送撕裂数据
-    if ((sequence_before != sequence_after) || (sequence_after & 1U))
-    {
-        return;
-    }
-
-    wifi_image_last_sequence = sequence_after;
-
-    if (left_count)
-    {
-        seekfree_assistant_camera_boundary_config(
-            &wifi_left_information,
-            SEEKFREE_ASSISTANT_DATA_TYPE_UINT8,
-            RGB565_BLUE,
-            left_count,
-            wifi_left_boundary);
-        seekfree_assistant_camera_boundary_send(&wifi_left_information);
-    }
-
-    if (right_count)
-    {
-        seekfree_assistant_camera_boundary_config(
-            &wifi_right_information,
-            SEEKFREE_ASSISTANT_DATA_TYPE_UINT8,
-            RGB565_GREEN,
-            right_count,
-            wifi_right_boundary);
-        seekfree_assistant_camera_boundary_send(&wifi_right_information);
-    }
-
-    if (mid_count)
-    {
-        seekfree_assistant_camera_boundary_config(
-            &wifi_mid_information,
-            SEEKFREE_ASSISTANT_DATA_TYPE_UINT8,
-            RGB565_RED,
-            mid_count,
-            wifi_mid_boundary);
-        seekfree_assistant_camera_boundary_send(&wifi_mid_information);
-    }
-
-    seekfree_assistant_camera_send(&wifi_image_information);
-}
 
 // ------------------ 初始化与主循环 ------------------
 
@@ -629,4 +449,177 @@ IFX_INTERRUPT(uart2_rx_isr, 0, UART2_RX_INT_PRIO)
 
 
 
+}
+
+// ------------------ PID 调参串口 ------------------
+
+// UART2 接收中断只搬运字节，命令解析统一放在 CPU0 主循环执行
+static void run_uart2_rx_isr(void)
+{
+    ucmd_isr_feed(&pid_debug_cmd);
+}
+
+// uart_cmd 的统一发送回调
+static void pid_debug_uart_reply(const char *text)
+{
+    uart_write_string(PID_DEBUG_UART, text);
+}
+
+// 依次输出左电机、右电机、方向 PID 的 target、actual、output
+static void pid_debug_send(void)
+{
+    (void)snprintf(pid_debug_text, sizeof(pid_debug_text),
+                   "s:%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\r\n",
+                   pid_left.controller.inc.target,
+                   pid_left.controller.inc.actual,
+                   pid_left.controller.inc.output,
+                   pid_right.controller.inc.target,
+                   pid_right.controller.inc.actual,
+                   pid_right.controller.inc.output,
+                   pid_gap.controller.pos.target,
+                   pid_gap.controller.pos.actual,
+                   pid_gap.controller.pos.output);
+    ucmd_send_text(&pid_debug_cmd, pid_debug_text);
+}
+
+// ------------------ WiFi 图传 ------------------
+
+// 初始化 WiFi 模块、TCP 连接以及逐飞助手图像对象
+static void wifi_image_init(void)
+{
+    // 初始化阶段允许等待连接成功；车辆控制中断此时尚未启动
+    while (wifi_spi_init(WIFI_IMAGE_SSID, WIFI_IMAGE_PASSWORD))
+    {
+        printf("\r\n connect wifi failed.\r\n");
+        system_delay_ms(100);
+    }
+
+    if (1 != WIFI_SPI_AUTO_CONNECT)
+    {
+        // 未启用驱动自动连接时，主动连接上位机图像端口
+        while (wifi_spi_socket_connect(
+                    "TCP",
+                    WIFI_IMAGE_TARGET_IP,
+                    WIFI_IMAGE_TARGET_PORT,
+                    WIFI_IMAGE_LOCAL_PORT))
+        {
+            printf("\r\n connect image TCP server failed.\r\n");
+            system_delay_ms(100);
+        }
+    }
+
+    seekfree_assistant_interface_init(SEEKFREE_ASSISTANT_WIFI_SPI);
+
+    // 图像尺寸使用视觉算法处理后的 LCDW × LCDH，而不是摄像头原始尺寸
+    seekfree_assistant_camera_config(
+        &wifi_image_information,
+        SEEKFREE_ASSISTANT_CAMERA_TYPE_MT9V03X,
+        LCDW,
+        LCDH,
+        wifi_image_buffer[0]);
+
+    wifi_image_ready = 1;
+    printf("\r\n wifi image ready: version=%s, module=%s, server=%s:%s\r\n",
+        wifi_spi_version,
+        wifi_spi_ip_addr_port,
+        WIFI_IMAGE_TARGET_IP,
+        WIFI_IMAGE_TARGET_PORT);
+}
+
+// 在 CPU0 主循环中发送一帧稳定图像及其左右边线、控制中线
+static void wifi_image_while(void)
+{
+    uint32 sequence_before;
+    uint32 sequence_after;
+    uint16 left_count = 0;
+    uint16 right_count = 0;
+    uint16 mid_count = 0;
+    uint16 row;
+    int point_x;
+
+    if (!wifi_image_ready)
+    {
+        return;
+    }
+
+    sequence_before = VisionFrameSequence;
+    // 序号为奇数表示 CPU1 正在更新；相同序号表示本帧已经发送过
+    if ((0 == sequence_before) || (sequence_before & 1U) || (sequence_before == wifi_image_last_sequence))
+    {
+        return;
+    }
+
+    memcpy(wifi_image_buffer[0], Pixle[0], sizeof(wifi_image_buffer));
+
+    // 同一稳定帧内复制二值图、左右边线以及最终用于控制的中线
+    for (row = 0; row < LCDH; row++)
+    {
+        point_x = ImageDeal[row].LeftBorder;
+        if (ImageDeal[row].IsLeftFind && point_x >= 0 && point_x < LCDW)
+        {
+            wifi_left_boundary[left_count].x = (uint8)point_x;
+            wifi_left_boundary[left_count].y = (uint8)row;
+            left_count++;
+        }
+
+        point_x = ImageDeal[row].RightBorder;
+        if (ImageDeal[row].IsRightFind && point_x >= 0 && point_x < LCDW)
+        {
+            wifi_right_boundary[right_count].x = (uint8)point_x;
+            wifi_right_boundary[right_count].y = (uint8)row;
+            right_count++;
+        }
+
+        point_x = ControlMidLine[row];
+        if (point_x >= 0 && point_x < LCDW)
+        {
+            wifi_mid_boundary[mid_count].x = (uint8)point_x;
+            wifi_mid_boundary[mid_count].y = (uint8)row;
+            mid_count++;
+        }
+    }
+
+    sequence_after = VisionFrameSequence;
+    // 复制期间若 CPU1 开始处理下一帧，则丢弃本次快照，避免发送撕裂数据
+    if ((sequence_before != sequence_after) || (sequence_after & 1U))
+    {
+        return;
+    }
+
+    wifi_image_last_sequence = sequence_after;
+
+    if (left_count)
+    {
+        seekfree_assistant_camera_boundary_config(
+            &wifi_left_information,
+            SEEKFREE_ASSISTANT_DATA_TYPE_UINT8,
+            RGB565_BLUE,
+            left_count,
+            wifi_left_boundary);
+        seekfree_assistant_camera_boundary_send(&wifi_left_information);
+    }
+
+    if (right_count)
+    {
+        seekfree_assistant_camera_boundary_config(
+            &wifi_right_information,
+            SEEKFREE_ASSISTANT_DATA_TYPE_UINT8,
+            RGB565_GREEN,
+            right_count,
+            wifi_right_boundary);
+        seekfree_assistant_camera_boundary_send(&wifi_right_information);
+    }
+
+    if (mid_count)
+    {
+        seekfree_assistant_camera_boundary_config(
+            &wifi_mid_information,
+            SEEKFREE_ASSISTANT_DATA_TYPE_UINT8,
+            RGB565_RED,
+            mid_count,
+            wifi_mid_boundary);
+        seekfree_assistant_camera_boundary_send(&wifi_mid_information);
+    }
+
+    seekfree_assistant_camera_send(&wifi_image_information);
 }
