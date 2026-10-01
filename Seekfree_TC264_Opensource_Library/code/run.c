@@ -110,9 +110,9 @@ static uint8 wifi_pid_group = WIFI_PID_GROUP_LEFT;
 #endif
 
 // ------------------ 速度决策参数 ------------------
-#define SPEED_LOW (50)   // 低速
-#define SPEED_MID (70)   // 中速
-#define SPEED_HIGH (120) // 高速
+#define SPEED_LOW (80)   // 低速
+#define SPEED_MID (120)   // 中速
+#define SPEED_HIGH (160) // 高速
 #define LOST_STEER_RECENTER_STEP (2.0)
 
 // ------------------ 方向环输出映射参数 ------------------
@@ -216,11 +216,11 @@ void run_init(void)
     pwm_init(SERVO_MOTOR_PWM, SERVO_MOTOR_FREQ, 0);
 
     // 电机PID初始化
-    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 1, 0.1, 0.0, 3000, -3000, 0, 0);
-    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 1, 0.1, 0.0, 3000, -3000, 0, 0);
+    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 0.01, 0.05, 0.0, 2000, -2000, 0, 0);
+    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 0.01, 0.05, 0.0, 2000, -2000, 0, 0);
 
     // 转向位置环：当前只使用横向误差 PID
-    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 0.45, 0.0, 0.1, 40, -40, 0, 0);
+    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 0.4, 0.0, 0.1, 40, -40, 0, 0);
 
     // 编码器平均滤波初始化
     filter_ring_init(&encoder_left_ring, encoder_left_buffer, ENCODER_FILTER_WINDOW);
