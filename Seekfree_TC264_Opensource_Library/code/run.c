@@ -72,6 +72,8 @@ static uint8 wifi_pid_group = WIFI_PID_GROUP_LEFT;
 #define DIR_L2 (P21_4)
 #define PWM_L2 (ATOM0_CH3_P21_5)
 
+#define MOTOR_STALL_PWM_THRESHOLD   1500    // 电机堵转时的 PWM 阈值，超过该值仍然没有转速则认为堵转
+
 // ------------------ 编码器相关 ------------------
 #define ENCODER_1 (TIM2_ENCODER)
 #define ENCODER_1_A (TIM2_ENCODER_CH1_P33_7)
@@ -487,8 +489,23 @@ void run_direct(int16 speed, int16 gap)
     int16 right_speed = (int16)PID_Controller_Calc(&pid_right, speed - gap, encoder_right);
 
     // 舵机和后轮差速共同转向，提高入弯速度和弯中跟随能力
-    run_motor_left_speed(left_speed);
-    run_motor_right_speed(right_speed);
+    // 根据电机实际速度和输出pwm限制防止电机堵转
+    if (encoder_left > -5 && encoder_left < 5 && (left_speed < -MOTOR_STALL_PWM_THRESHOLD || left_speed > MOTOR_STALL_PWM_THRESHOLD))
+    {
+        run_motor_left_speed(0);
+    }
+    else
+    {
+        run_motor_left_speed(left_speed);
+    }
+    if (encoder_right > -5 && encoder_right < 5 && (right_speed < -MOTOR_STALL_PWM_THRESHOLD || right_speed > MOTOR_STALL_PWM_THRESHOLD))
+    {
+        run_motor_right_speed(0);
+    }
+    else
+    {
+        run_motor_right_speed(right_speed);
+    }
 }
 
 // ------------------ 周期中断 ------------------
