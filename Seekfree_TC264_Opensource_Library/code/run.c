@@ -115,11 +115,9 @@ static uint8 wifi_pid_group = WIFI_PID_GROUP_LEFT;
 #define SPEED_LOW (80)   // 低速
 #define SPEED_MID (120)   // 中速
 #define SPEED_HIGH (160) // 高速
-#define LOST_STEER_RECENTER_STEP (2.0)
 
 // ------------------ 方向环输出映射参数 ------------------
 #define STEER_OUTPUT_MAP_SCALE (0.8) // 映射比例：PID 原始输出乘以该系数
-#define STEER_INPUT_FILTER_ALPHA (0.2f) // 方向环输入一阶低通系数，越小滤波越强
 
 // ------------------ 运行状态与控制器 ------------------
 volatile int16 raw_left = 0;
@@ -401,27 +399,22 @@ double run_get_gap(void)
 {
     static double held_gap = 0;
     static uint8 previous_lost_count = 0;
+    float filtered_mid_error;
 
-    if (!run_enabled || VisionStopFlag || ImageFlag.Stop)
+    if (!run_enabled || ImageFlag.Zebra_Flag)
     {
         held_gap = 0;
         previous_lost_count = 0;
+        filter_rc_state_reset(&steer_input_filter);
         return 0;
     }
 
-    if (ControlMidValid)
-    {
-        // 重新找到有效中线后复位转向 PID，防止丢线期间的历史误差突变
-        if (previous_lost_count > 0)
-        {
-            PID_Controller_Reset(&pid_gap);
-        }
-        // 保留方向 PID 原始输出，后轮差速直接使用该值
-        held_gap = PID_Controller_Calc(&pid_gap, 0, (double)ControlMidError);
+    // 无论当前中线是否有效，都将当前中线误差滤波后送入方向 PID
+    filtered_mid_error = filter_rc_low_pass(&steer_input_filter, (float)ControlMidError,0.2);
+    held_gap = PID_Controller_Calc(&pid_gap, 0, (double)filtered_mid_error);
 
-        previous_lost_count = 0;
-        return held_gap;
-    }
+    return held_gap;
+}
 
     if (LineLostCount != previous_lost_count)
     {
