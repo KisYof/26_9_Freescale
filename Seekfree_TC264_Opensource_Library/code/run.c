@@ -32,6 +32,8 @@ typedef struct
 {
     uint32 frame_sequence; // 帧序号，用于判断是否收到新帧
     int32 mid_error;       // 控制中线偏差，转向 PID 的输入
+    uint8 mid_valid;       // 当前控制中线是否有效
+    uint8 line_lost;       // 视觉丢线标志
     uint8 zebra;           // 斑马线标志，置位时停车
 } run_vision_struct;
 
@@ -163,23 +165,27 @@ static void run_request_start(void)
     run_vision_ticks = 0;
 }
 
-// 转向环输出：中线偏差低通滤波后送转向 PID，得到左右轮差速（供差速和舵机共用）；
-// 非运行状态直接返回 0，并复位中线偏差滤波。
+// 转向环输出：保存最后一次有效视觉误差，丢线时保持该误差不变，
+// 再经过低通滤波送入转向 PID，得到左右轮差速（供差速和舵机共用）。
+// 非运行状态直接返回 0，并复位保持值和中线偏差滤波。
 double run_get_gap(void)
 {
-    static double held_gap = 0;
+    static int32 held_mid_error = 0;
     float filtered_mid_error;
 
     if (RUN_STATE_RUNNING != run_status.state)
     {
-        held_gap = 0;
+        held_mid_error = 0;
         filter_rc_state_reset(&steer_input_filter);
         return 0;
     }
 
-    filtered_mid_error = filter_rc_low_pass(&steer_input_filter, (float)run_vision.mid_error, 1);
-    held_gap = PID_Controller_Calc(&pid_gap, 0, (double)filtered_mid_error);
-    return held_gap;
+    // 只有控制中线有效且当前未丢线时才更新；丢线期间保持最后一次有效误差。
+    if (run_vision.mid_valid && !run_vision.line_lost)
+        held_mid_error = run_vision.mid_error;
+
+    filtered_mid_error = filter_rc_low_pass(&steer_input_filter, (float)held_mid_error, 1);
+    return PID_Controller_Calc(&pid_gap, 0, (double)filtered_mid_error);
 }
 
 // 单轮堵转判定：目标速度足够大、实际速度接近 0、PWM 却已推到阈值以上，
@@ -250,6 +256,8 @@ static uint8 run_read_vision(run_vision_struct *snapshot)
     __dsync();
     copy.frame_sequence = sequence;
     copy.mid_error = ControlMidError;
+    copy.mid_valid = ControlMidValid;
+    copy.line_lost = LineLostFlag;
     copy.zebra = ImageFlag.Zebra_Flag;
     __dsync();
     if (sequence != VisionFrameSequence)
