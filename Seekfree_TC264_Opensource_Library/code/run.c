@@ -55,7 +55,7 @@ static PID_Controller_t pid_right;
 static PID_Controller_t pid_gap;
 
 // 编码器滤波：滑动平均窗口 + 一阶低通；steer_input_filter 用于中线偏差
-#define ENCODER_FILTER_WINDOW (32)
+#define ENCODER_FILTER_WINDOW (20)
 static filter_ring_t encoder_left_ring;
 static filter_ring_t encoder_right_ring;
 static float encoder_left_buffer[ENCODER_FILTER_WINDOW];
@@ -371,13 +371,13 @@ static void run_speed_tick_2ms(void)
     encoder_left = raw_left;
     filter_ring_write(&encoder_left_ring, encoder_left);
     encoder_left = filter_moving_average(&encoder_left_ring);
-    encoder_left = filter_rc_low_pass(&encoder_left_filter, encoder_left, 0.2);
+    encoder_left = filter_rc_low_pass(&encoder_left_filter, encoder_left, 0.4);
 
     raw_right = feedback.raw_right_speed;
     encoder_right = raw_right;
     filter_ring_write(&encoder_right_ring, encoder_right);
     encoder_right = filter_moving_average(&encoder_right_ring);
-    encoder_right = filter_rc_low_pass(&encoder_right_filter, encoder_right, 0.2);
+    encoder_right = filter_rc_low_pass(&encoder_right_filter, encoder_right, 0.4);
 
     if (RUN_STATE_RUNNING == run_status.state)
     {
