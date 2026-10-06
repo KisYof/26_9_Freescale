@@ -18,7 +18,7 @@
 #define RUN_SPEED_LIMIT (1000)         // 目标速度限幅
 #define RUN_SPEED_STEP (4)             // 每个 10ms 方向任务最多变化 4cm/s，保持原斜坡速率
 #define SPEED_MID (170)                // 调试层默认目标速度
-#define STEER_OUTPUT_MAP_SCALE (0.5)   // 转向输出换算成舵机角的缩放系数
+#define STEER_OUTPUT_MAP_SCALE (0.25)  // 转向输出换算成舵机角的缩放系数
 
 // 原始速度与滤波后速度：只在 2ms 速度任务里更新
 volatile int16 raw_left = 0;
@@ -82,9 +82,9 @@ void run_init(void)
     hardware_init();
 
     // 速度环从 5ms 改为 2ms：Ki 由 0.03 换算为 0.012；方向环改为 10ms：Kd 由 0.2 换算为 0.1。
-    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 0.02, 0.012, 0.0, 3000, -3000, 0, 0);
-    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 0.02, 0.012, 0.0, 3000, -3000, 0, 0);
-    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.2, 0.0, 0.1, 90, -90, 0, 0);
+    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 0.04, 0.01, 0.0, 3000, -3000, 0, 0);
+    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 0.04, 0.01, 0.0, 3000, -3000, 0, 0);
+    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.2, 0.0, 0.3, 90, -90, 0, 0);
 
     // 滑动平均窗口与三个一阶滤波器全部清零
     filter_ring_init(&encoder_left_ring, encoder_left_buffer, ENCODER_FILTER_WINDOW);
