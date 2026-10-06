@@ -16,9 +16,23 @@
 #define RUN_STALL_TARGET_MIN (20)      // 目标速度大于 20cm/s 才谈堵转
 #define RUN_STALL_SPEED_MAX (5)        // 实际速度绝对值小于 5cm/s 视为停转
 #define RUN_SPEED_LIMIT (1000)         // 目标速度限幅
-#define RUN_SPEED_STEP (4)             // 每个 10ms 方向任务最多变化 4cm/s，保持原斜坡速率
+#define RUN_SPEED_ACCEL_STEP (2)       // 10ms 加速步长，保守初值，需实车标定
+#define RUN_SPEED_DECEL_STEP (6)       // 10ms 减速步长，必须大于加速步长，需实车标定
 #define SPEED_MID (170)                // 调试层默认目标速度
 #define STEER_OUTPUT_MAP_SCALE (0.25)  // 转向输出换算成舵机角的缩放系数
+
+// Speed Planner 保守初值：Track_Slope_x1000 是弯道趋势而非严格几何曲率，以下参数均需实车标定。
+#define RUN_STRAIGHT_SLOPE_THRESHOLD (120) // 小于此值且 straight_long 有效，才累计直道确认
+#define RUN_CURVE_SLOPE_LOW (150)          // 轻弯起点 S1
+#define RUN_CURVE_SLOPE_MID (500)          // 中弯分段点 S2
+#define RUN_CURVE_SLOPE_HIGH (1000)        // 急弯分段点 S3
+#define RUN_SPEED_CURVE_MILD (130)         // 未确认长直道/中等弯道的速度上限
+#define RUN_SPEED_CURVE_MIN (90)           // 急弯最低速度上限
+#define RUN_SPEED_UNKNOWN_LIMIT (100)      // slope 无效时的保守速度上限
+#define RUN_SPEED_CROSS_LIMIT (100)        // 十字速度上限
+#define RUN_SPEED_RING_LIMIT (90)          // 环岛速度上限
+#define RUN_SPEED_LINE_LOST_LIMIT (70)     // 丢线时的安全速度上限
+#define RUN_STRAIGHT_CONFIRM_FRAMES (4U)   // 连续有效视觉帧数，约 80ms（按 50fps 估算）
 
 // 原始速度与滤波后速度：只在 2ms 速度任务里更新
 volatile int16 raw_left = 0;
@@ -37,6 +51,13 @@ typedef struct
     uint8 mid_valid;       // 当前控制中线是否有效
     uint8 line_lost;       // 视觉丢线标志
     uint8 zebra;           // 斑马线标志，置位时停车
+    int16 track_slope;     // 远近控制中线得到的赛道倾斜趋势（放大 1000 倍）
+    uint8 track_slope_valid;
+    uint8 straight_long;   // 仅作为恢复高速的许可
+    uint8 cross;
+    uint8 ring_active;     // 0=无环岛，非 0=环岛方向/活动状态
+    uint8 ring_stage;
+    uint8 ring_size;
 } run_vision_struct;
 
 static run_vision_struct run_vision;
@@ -48,6 +69,13 @@ static uint8 run_speed_tick_count = 0;   // 1ms 基础节拍到 2ms 速度任务
 static uint8 run_direction_tick_count = 0; // 1ms 基础节拍到 10ms 方向任务的分频计数
 static int32 run_held_mid_error = 0;     // 丢线时保持最后一次有效方向误差
 static double run_direction_gap = 0;    // 最近一次新视觉帧计算得到的方向输出
+static volatile int16 run_planned_speed = 0;       // 多重限速求最小值后的目标基础速度
+static volatile int16 run_curve_speed_limit = 0;   // 弯道趋势/直道许可产生的速度上限
+static volatile int16 run_element_speed_limit = 0; // 十字/环岛产生的速度上限
+static volatile int16 run_safety_speed_limit = 0;  // 丢线产生的速度上限
+static uint8 run_straight_confirm_count = 0;
+static uint8 run_straight_confirmed = 0;
+static uint32 run_speed_planner_frame_sequence = 0;
 
 // 三路 PID：左右轮速度环为增量式，转向环为位置式
 static PID_Controller_t pid_left;
@@ -72,6 +100,11 @@ static void run_control_tick_1ms(void);            // 1ms 基础调度：方向�
 static void run_direction_tick_10ms(void);         // 10ms 读取最新视觉结果并更新方向 PID
 static void run_speed_tick_2ms(void);              // 2ms 采样编码器、速度 PID、堵转保护和电机输出
 static void run_update_direction(void);            // 用当前视觉快照更新一次方向 PID
+static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 user_limit);
+static int16 run_calc_element_speed_limit(const run_vision_struct *vision);
+static int16 run_calc_safety_speed_limit(const run_vision_struct *vision);
+static int16 run_speed_planner(const run_vision_struct *vision);
+static void run_update_speed_ramp(int16 target_speed);
 
 // 上电调用一次：初始化硬件、三路 PID、编码器滤波，注册调试引用，
 // 进入空闲态后再启动 1ms 基础调度中断与 10ms 调试中断。
@@ -81,10 +114,10 @@ void run_init(void)
 
     hardware_init();
 
-    // 速度环从 5ms 改为 2ms：Ki 由 0.03 换算为 0.012；方向环改为 10ms：Kd 由 0.2 换算为 0.1。
-    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 0.04, 0.01, 0.0, 3000, -3000, 0, 0);
-    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 0.04, 0.01, 0.0, 3000, -3000, 0, 0);
-    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.2, 0.0, 0.3, 90, -90, 0, 0);
+    // 保持当前左右轮速度 PID 与方向 PID 参数不变，本次 Speed Planner 只调整目标速度。
+    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3000, -3000, 0, 0);
+    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3000, -3000, 0, 0);
+    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.4, 0.0, 0.5, 90, -90, 0, 0);
 
     // 滑动平均窗口与三个一阶滤波器全部清零
     filter_ring_init(&encoder_left_ring, encoder_left_buffer, ENCODER_FILTER_WINDOW);
@@ -98,8 +131,15 @@ void run_init(void)
     debug_control.left_pid = &pid_left;
     debug_control.right_pid = &pid_right;
     debug_control.gap_pid = &pid_gap;
-    debug_control.raw_left = &raw_left;
-    debug_control.raw_right = &raw_right;
+    debug_control.planned_speed = &run_planned_speed;
+    debug_control.ramped_speed = &speed;
+    debug_control.track_slope = &run_vision.track_slope;
+    debug_control.track_slope_valid = &run_vision.track_slope_valid;
+    debug_control.straight_long = &run_vision.straight_long;
+    debug_control.cross = &run_vision.cross;
+    debug_control.ring_active = &run_vision.ring_active;
+    debug_control.ring_stage = &run_vision.ring_stage;
+    debug_control.line_lost = &run_vision.line_lost;
     run_debug_init(&debug_control);
 
     // run_debug_init() 不绘屏；IPS200 初始化完成后，主循环才执行绘屏。
@@ -146,6 +186,13 @@ static void run_enter_state(run_state_enum state)
     filter_rc_state_reset(&steer_input_filter);
     run_held_mid_error = 0;
     run_direction_gap = 0;
+    run_planned_speed = 0;
+    run_curve_speed_limit = 0;
+    run_element_speed_limit = 0;
+    run_safety_speed_limit = 0;
+    run_straight_confirm_count = 0;
+    run_straight_confirmed = 0;
+    run_speed_planner_frame_sequence = 0;
     if (RUN_STATE_FAULT == state)
         run_debug_discard_keys();
 }
@@ -274,11 +321,163 @@ static uint8 run_read_vision(run_vision_struct *snapshot)
     copy.mid_valid = ControlMidValid;
     copy.line_lost = LineLostFlag;
     copy.zebra = ImageFlag.Zebra_Flag;
+    copy.track_slope = Track_Slope_x1000;
+    copy.track_slope_valid = Track_SlopeValid;
+    copy.straight_long = ImageFlag.straight_long;
+    copy.cross = ImageFlag.Cross_Flag;
+    copy.ring_active = ImageFlag.image_element_rings;
+    copy.ring_stage = ImageFlag.image_element_rings_flag;
+    copy.ring_size = ImageFlag.ring_big_small;
     __dsync();
     if (sequence != VisionFrameSequence)
         return 0;
     *snapshot = copy;
     return 1;
+}
+
+// 在两个标定点之间做整数线性插值，保证相邻 slope 分段的速度限制连续。
+static int16 run_speed_limit_lerp(int16 value, int16 input_low, int16 input_high,
+                                  int16 output_low, int16 output_high)
+{
+    int32 numerator;
+
+    if (input_high <= input_low)
+        return output_high;
+    numerator = (int32)(value - input_low) * (int32)(output_high - output_low);
+    return (int16)(output_low + numerator / (input_high - input_low));
+}
+
+// 普通赛道限速：有效 slope 使用连续分段映射；无效 slope 绝不按直道放行。
+// straight_long 只负责允许恢复用户最高速度，未确认时最高限制在轻弯速度。
+static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 user_limit)
+{
+    int16 mild_limit = (user_limit < RUN_SPEED_CURVE_MILD) ? user_limit : RUN_SPEED_CURVE_MILD;
+    int16 minimum_limit = (user_limit < RUN_SPEED_CURVE_MIN) ? user_limit : RUN_SPEED_CURVE_MIN;
+    int32 slope = vision->track_slope;
+
+    if (!vision->track_slope_valid)
+    {
+        return (user_limit < RUN_SPEED_UNKNOWN_LIMIT) ? user_limit : RUN_SPEED_UNKNOWN_LIMIT;
+    }
+
+    if (slope < 0)
+        slope = -slope;
+    if (slope > 32767)
+        slope = 32767;
+    if (slope <= RUN_CURVE_SLOPE_LOW)
+    {
+        return run_straight_confirmed ? user_limit : mild_limit;
+    }
+    if (slope < RUN_CURVE_SLOPE_MID)
+    {
+        return run_speed_limit_lerp((int16)slope,
+                                    RUN_CURVE_SLOPE_LOW, RUN_CURVE_SLOPE_MID,
+                                    user_limit, mild_limit);
+    }
+    if (slope < RUN_CURVE_SLOPE_HIGH)
+    {
+        return run_speed_limit_lerp((int16)slope,
+                                    RUN_CURVE_SLOPE_MID, RUN_CURVE_SLOPE_HIGH,
+                                    mild_limit, minimum_limit);
+    }
+    return minimum_limit;
+}
+
+// 环岛和十字的补线会影响 slope，因此使用独立上限，并与其他限制取最小值。
+static int16 run_calc_element_speed_limit(const run_vision_struct *vision)
+{
+    int16 limit = RUN_SPEED_LIMIT;
+
+    if (vision->cross && RUN_SPEED_CROSS_LIMIT < limit)
+        limit = RUN_SPEED_CROSS_LIMIT;
+    if (vision->ring_active && RUN_SPEED_RING_LIMIT < limit)
+        limit = RUN_SPEED_RING_LIMIT;
+    return limit;
+}
+
+// 丢线期间方向环仍保持最后一次有效误差，因此必须同时降低基础速度。
+static int16 run_calc_safety_speed_limit(const run_vision_struct *vision)
+{
+    return vision->line_lost ? RUN_SPEED_LINE_LOST_LIMIT : RUN_SPEED_LIMIT;
+}
+
+// 综合用户上限、弯道、特殊元素和安全限制；只产生基础目标速度，不操作执行器或 PID。
+static int16 run_speed_planner(const run_vision_struct *vision)
+{
+    int16 planned = speed_setting;
+    int32 slope = vision->track_slope;
+
+    if (planned > RUN_SPEED_LIMIT)
+        planned = RUN_SPEED_LIMIT;
+    if (planned < -RUN_SPEED_LIMIT)
+        planned = -RUN_SPEED_LIMIT;
+
+    // 反向/停车命令保留原语义；当前前向赛道规划仅处理正速度。
+    if (planned <= 0)
+    {
+        run_curve_speed_limit = planned;
+        run_element_speed_limit = planned;
+        run_safety_speed_limit = planned;
+        return planned;
+    }
+
+    // 直道确认按“新视觉帧”计数，而不是按 10ms 调度次数重复累计同一帧。
+    if (vision->frame_sequence != run_speed_planner_frame_sequence)
+    {
+        run_speed_planner_frame_sequence = vision->frame_sequence;
+        if (slope < 0)
+            slope = -slope;
+
+        if (vision->track_slope_valid
+            && slope < RUN_STRAIGHT_SLOPE_THRESHOLD
+            && vision->straight_long)
+        {
+            if (run_straight_confirm_count < RUN_STRAIGHT_CONFIRM_FRAMES)
+                run_straight_confirm_count++;
+            if (run_straight_confirm_count >= RUN_STRAIGHT_CONFIRM_FRAMES)
+                run_straight_confirmed = 1;
+        }
+        else
+        {
+            run_straight_confirm_count = 0;
+            // slope 阈值留出 S1-StraightThreshold 的回差，避免临界值轻微抖动反复切换。
+            if (!vision->track_slope_valid
+                || !vision->straight_long
+                || slope >= RUN_CURVE_SLOPE_LOW)
+            {
+                run_straight_confirmed = 0;
+            }
+        }
+    }
+
+    run_curve_speed_limit = run_calc_curve_speed_limit(vision, planned);
+    run_element_speed_limit = run_calc_element_speed_limit(vision);
+    run_safety_speed_limit = run_calc_safety_speed_limit(vision);
+
+    if (run_curve_speed_limit < planned)
+        planned = run_curve_speed_limit;
+    if (run_element_speed_limit < planned)
+        planned = run_element_speed_limit;
+    if (run_safety_speed_limit < planned)
+        planned = run_safety_speed_limit;
+    return planned;
+}
+
+// 10ms 基础速度斜坡：快速减速、缓慢加速，并保证不会越过目标值。
+static void run_update_speed_ramp(int16 target_speed)
+{
+    int16 delta;
+
+    if (speed < target_speed)
+    {
+        delta = target_speed - speed;
+        speed += (delta > RUN_SPEED_ACCEL_STEP) ? RUN_SPEED_ACCEL_STEP : delta;
+    }
+    else if (speed > target_speed)
+    {
+        delta = speed - target_speed;
+        speed -= (delta > RUN_SPEED_DECEL_STEP) ? RUN_SPEED_DECEL_STEP : delta;
+    }
 }
 
 // 10ms 方向任务：读取最新的一致视觉快照；视觉约 20ms 更新一次，因此同一帧
@@ -287,7 +486,6 @@ static void run_direction_tick_10ms(void)
 {
     uint8 keys = run_debug_take_keys();
     run_vision_struct snapshot;
-    int16 setting;
 
     // 视觉超时以 10ms 方向任务计数；只有真正的新帧才清零。
     if (run_vision_ticks < 65535U)
@@ -329,16 +527,9 @@ static void run_direction_tick_10ms(void)
             run_enter_state(RUN_STATE_IDLE);
             break;
         }
-        // 目标速度先限幅，再按每周期步长斜坡逼近，避免阶跃
-        setting = speed_setting;
-        if (setting > RUN_SPEED_LIMIT)
-            setting = RUN_SPEED_LIMIT;
-        if (setting < -RUN_SPEED_LIMIT)
-            setting = -RUN_SPEED_LIMIT;
-        if (speed < setting)
-            speed += (setting - speed > RUN_SPEED_STEP) ? RUN_SPEED_STEP : setting - speed;
-        else if (speed > setting)
-            speed -= (speed - setting > RUN_SPEED_STEP) ? RUN_SPEED_STEP : speed - setting;
+        // 同一视觉快照同时供速度规划与方向控制使用；规划只改变基础目标速度。
+        run_planned_speed = run_speed_planner(&run_vision);
+        run_update_speed_ramp(run_planned_speed);
         // 固定 10ms 更新方向 PID 和舵机；速度任务读取同一个最新 gap。
         run_update_direction();
         hardware_set_servo((int16)(run_direction_gap * STEER_OUTPUT_MAP_SCALE));

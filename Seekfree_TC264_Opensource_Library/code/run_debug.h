@@ -18,8 +18,15 @@ typedef struct
     PID_Controller_t *left_pid;     // 左轮速度环
     PID_Controller_t *right_pid;    // 右轮速度环
     PID_Controller_t *gap_pid;      // 转向（中线偏差）环
-    volatile int16 *raw_left;       // 左轮 2ms 未滤波原始速度
-    volatile int16 *raw_right;      // 右轮 2ms 未滤波原始速度
+    const volatile int16 *planned_speed; // Speed Planner 输出
+    const volatile int16 *ramped_speed;  // 非对称斜坡后的基础速度
+    const volatile int16 *track_slope;   // 当前一致视觉快照中的弯道趋势
+    const volatile uint8 *track_slope_valid;
+    const volatile uint8 *straight_long;
+    const volatile uint8 *cross;
+    const volatile uint8 *ring_active;
+    const volatile uint8 *ring_stage;
+    const volatile uint8 *line_lost;
 } run_debug_control_ref_t;
 
 void run_debug_init(const run_debug_control_ref_t *control); // 初始化按键、屏幕与 WiFi/串口，须在控制中断启动前调用
