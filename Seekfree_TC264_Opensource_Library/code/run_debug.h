@@ -18,6 +18,8 @@ typedef struct
     PID_Controller_t *left_pid;     // 左轮速度环
     PID_Controller_t *right_pid;    // 右轮速度环
     PID_Controller_t *gap_pid;      // 转向（中线偏差）环
+    volatile int16 *raw_left;       // 左轮 2ms 未滤波原始速度
+    volatile int16 *raw_right;      // 右轮 2ms 未滤波原始速度
 } run_debug_control_ref_t;
 
 void run_debug_init(const run_debug_control_ref_t *control); // 初始化按键、屏幕与 WiFi/串口，须在控制中断启动前调用
