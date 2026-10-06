@@ -1,7 +1,7 @@
 #include "hardware.h"
 
 // 硬件层只做三件事：驱动外设、采样换算、执行器输出。
-// 周期节拍由 run 层的 5ms 中断给定，本层不含滤波、PID 和状态判断。
+// 周期节拍由 run 层的 2ms 速度任务给定，本层不含滤波、PID 和状态判断。
 
 // ------------------ 电机 ------------------
 #define DIR_R2 (P21_2)             // 右电机方向脚
@@ -25,7 +25,7 @@
 #define PULSE_PER_WHEEL_REV (WHEEL_TO_ENCODER_RATIO * PULSE_PRE_ROUND * ENCODER_MULTIPLE) // 轮子转一圈对应的脉冲数
 #define RADIUS_OF_TYRE 3.2f                                            // 轮半径，单位 cm
 #define LINE_SPEED_CM_REV (RADIUS_OF_TYRE * 2.0f * 3.1415926f)        // 轮子转一圈的周长，单位 cm
-#define SAMPLE_TIME_S 0.005f                                           // 采样周期，必须与 5ms 控制中断一致
+#define SAMPLE_TIME_S 0.002f                                           // 采样周期，必须与 2ms 速度任务一致
 #define CALC_WHEEL_RPS(pulse_cnt) ((pulse_cnt) / (PULSE_PER_WHEEL_REV * SAMPLE_TIME_S))  // 脉冲数 -> 转速 r/s
 #define CALC_LINE_SPEED_CM_S(pulse_cnt) (CALC_WHEEL_RPS(pulse_cnt) * LINE_SPEED_CM_REV)  // 脉冲数 -> 线速度 cm/s
 
@@ -66,9 +66,9 @@ void hardware_init(void)
     hardware_reset_feedback();
 }
 
-// 固定由 5ms 控制周期调用：读取脉冲、换算为 cm/s，并清空计数器。
+// 固定由 2ms 速度任务调用：读取脉冲、换算为 cm/s，并清空计数器。
 // 左轮编码器安装方向与右轮相反，取负号后统一为“正数=前进”。
-void hardware_update_5ms(void)
+void hardware_update_2ms(void)
 {
     hardware_feedback.raw_left_speed = CALC_LINE_SPEED_CM_S(-encoder_get_count(ENCODER_1));
     encoder_clear_count(ENCODER_1);

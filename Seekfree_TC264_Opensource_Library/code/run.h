@@ -4,15 +4,15 @@
 #include "zf_common_headfile.h"
 
 // ------------------ 运行层接口 ------------------
-// 状态机、5ms 控制周期、双轮速度 PID 与转向 PID、堵转和视觉超时保护。
-// 状态只允许在 5ms 中断里改写，主循环通过 run_get_status() 只读。
+// 1ms 基础调度、2ms 双轮速度 PID、10ms 方向 PID、堵转和视觉超时保护。
+// 状态只允许在控制中断里改写，主循环通过 run_get_status() 只读。
 
 // ------------------ 调试功能开关：1=开启，0=关闭 ------------------
 #define RUN_WIFI_IMAGE_ENABLE     (1)   // WiFi 图像、边线、控制中线和前瞻标记传输
 #define RUN_WIFI_PID_DEBUG_ENABLE (1)   // WiFi PID 参数调节与示波器传输
 #define RUN_UART_PID_DEBUG_ENABLE (0)   // 串口 PID 文本调参与数据输出
 
-// 运行状态，只由 5ms 控制中断修改，主循环只读取。
+// 运行状态，只由控制中断修改，主循环只读取。
 typedef enum
 {
     RUN_STATE_IDLE = 0,       // 空闲：等待 KEY1
@@ -43,8 +43,8 @@ typedef struct
 } run_status_struct;
 
 void run_get_status(run_status_struct *status); // 关中断拷贝状态，供主循环和调试层只读
-void run_init(void);                            // 初始化硬件、PID、滤波并启动 5ms/10ms 中断
+void run_init(void);                            // 初始化硬件、PID、滤波并启动 1ms/10ms 中断
 void run_while(void);                           // 主循环入口，只转发给调试层轮询
-double run_get_gap(void);                       // 取转向 PID 输出（左右轮差速），非运行状态返回 0
+double run_get_gap(void);                       // 取最近一帧的转向 PID 输出（左右轮差速），非运行状态返回 0
 
 #endif
