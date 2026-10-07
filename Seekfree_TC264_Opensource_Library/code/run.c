@@ -115,8 +115,8 @@ void run_init(void)
     hardware_init();
 
     // 保持当前左右轮速度 PID 与方向 PID 参数不变，本次 Speed Planner 只调整目标速度。
-    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3000, -3000, 0, 0);
-    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3000, -3000, 0, 0);
+    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3500, -3500, 0, 0);
+    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3500, -3500, 0, 0);
     PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.4, 0.0, 0.5, 90, -90, 0, 0);
 
     // 滑动平均窗口与三个一阶滤波器全部清零
