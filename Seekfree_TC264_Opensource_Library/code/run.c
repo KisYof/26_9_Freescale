@@ -19,7 +19,7 @@
 #define RUN_SPEED_ACCEL_STEP (2)       // 10ms 加速步长，保守初值，需实车标定
 #define RUN_SPEED_DECEL_STEP (6)       // 10ms 减速步长，必须大于加速步长，需实车标定
 #define SPEED_MID (170)                // 调试层默认目标速度
-#define STEER_OUTPUT_MAP_SCALE (0.25)  // 转向输出换算成舵机角的缩放系数
+#define STEER_OUTPUT_MAP_SCALE (0.20)  // 转向输出换算成舵机角的缩放系数
 
 // Speed Planner 保守初值：Track_Slope_x1000 是弯道趋势而非严格几何曲率，以下参数均需实车标定。
 #define RUN_STRAIGHT_SLOPE_THRESHOLD (120) // 小于此值且 straight_long 有效，才累计直道确认
