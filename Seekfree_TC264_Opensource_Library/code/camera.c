@@ -167,7 +167,7 @@ uint8 Half_Ring_Wide_small[LCDH]=
 //建立元素前瞻行参数表
 static const uint8 Vision_ProspectRow[VP_COUNT] =
 {
-    26,     // 普通赛道：看远一点
+    35,     // 普通赛道：看远一点
     32,     // 十字：看中间
     30,     // 斑马线
     38,     // 圆环入口：看近一点
