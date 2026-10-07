@@ -50,7 +50,7 @@ typedef struct
     int32 mid_error;       // 控制中线偏差，转向 PID 的输入
     uint8 mid_valid;       // 当前控制中线是否有效
     uint8 line_lost;       // 视觉丢线标志
-    uint8 zebra;           // 斑马线标志，置位时停车
+    uint8 stop;            // 视觉停车标志，第二次斑马线处理完成后置位
     int16 track_slope;     // 远近控制中线得到的赛道倾斜趋势（放大 1000 倍）
     uint8 track_slope_valid;
     uint8 straight_long;   // 仅作为恢复高速的许可
@@ -266,9 +266,9 @@ static uint8 run_stall_check(int16 target, int16 actual, int16 pwm, uint16 *tick
     return (*ticks >= RUN_STALL_CONFIRM_TICKS);
 }
 
-// 一个控制周期的执行链：目标速度 ± 差速 -> 双轮 PID -> 堵转检查 -> 斑马线停车 -> 输出 PWM。
-// 状态不是 RUNNING 时直接停输出返回；一旦判故障或斑马线就不再下发 PWM。
-static void run_direct(int16 target_speed, int16 gap, uint8 zebra_stop)
+// 一个控制周期的执行链：目标速度 ± 差速 -> 双轮 PID -> 堵转检查 -> 视觉停车 -> 输出 PWM。
+// 状态不是 RUNNING 时直接停输出返回；一旦判故障或收到停车标志就不再下发 PWM。
+static void run_direct(int16 target_speed, int16 gap, uint8 stop_requested)
 {
     int16 left_target = target_speed + gap;
     int16 right_target = target_speed - gap;
@@ -297,9 +297,9 @@ static void run_direct(int16 target_speed, int16 gap, uint8 zebra_stop)
         run_enter_fault(fault);
         return;
     }
-    if (zebra_stop)
+    if (stop_requested)
     {
-        // 斑马线：回空闲态，run_enter_state 里已停输出
+        // 第二次斑马线处理完成：回空闲态，run_enter_state 里已停输出
         run_enter_state(RUN_STATE_IDLE);
         return;
     }
@@ -320,7 +320,7 @@ static uint8 run_read_vision(run_vision_struct *snapshot)
     copy.mid_error = ControlMidError;
     copy.mid_valid = ControlMidValid;
     copy.line_lost = LineLostFlag;
-    copy.zebra = ImageFlag.Zebra_Flag;
+    copy.stop = ImageFlag.Stop;
     copy.track_slope = Track_Slope_x1000;
     copy.track_slope_valid = Track_SlopeValid;
     copy.straight_long = ImageFlag.straight_long;
@@ -521,8 +521,8 @@ static void run_direction_tick_10ms(void)
             run_enter_fault(RUN_FAULT_VISION_TIMEOUT);
             break;
         }
-        // 斑马线保护在方向任务中立即停车，不等待下一次 2ms 速度任务。
-        if (run_vision.zebra)
+        // 视觉停车标志在方向任务中立即生效，不等待下一次 2ms 速度任务。
+        if (run_vision.stop)
         {
             run_enter_state(RUN_STATE_IDLE);
             break;
@@ -574,7 +574,7 @@ static void run_speed_tick_2ms(void)
     {
         if (run_state_ticks < 65535U)
             run_state_ticks++;
-        run_direct(speed, (int16)run_get_gap(), run_vision.zebra);
+        run_direct(speed, (int16)run_get_gap(), run_vision.stop);
     }
     else
     {
