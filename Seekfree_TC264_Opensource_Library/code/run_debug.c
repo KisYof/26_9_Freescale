@@ -542,13 +542,16 @@ static void wifi_debug_param_while(void)
     }
 }
 
-// WiFi 示波器通道：0~5 = 左/右轮 target、actual、output；
-// 6~9 = track slope、planned speed、斜坡后 speed、direction gap；
-// 10~15 = slope valid、straight_long、cross、ring active、ring stage、line lost。
+// WiFi 示波器通道：0~8 = 左轮、右轮、方向环三组 target、actual、output；
+// 9~11 = track slope、planned speed、斜坡后 speed；
+// 12~15 = slope valid、straight_long、赛道元素编码、line lost。
+// 赛道元素编码 = cross + (ring_active << 1)：0=无，1=十字，2=左环岛，4=右环岛，
+// 3/5 表示十字标志与左/右环岛标志同时存在。ring stage 当前不参与速度规划，不占示波器通道。
 // PID 参数仍通过参数表在线查看/修改，不再占用示波器通道。
 static void wifi_pid_oscilloscope_send(void)
 {
     uint32 interrupt_state = interrupt_global_disable();
+    uint8 track_element_state;
 
     wifi_pid_oscilloscope_buffer[0] = (float)run_debug_control.left_pid->controller.inc.target;
     wifi_pid_oscilloscope_buffer[1] = (float)run_debug_control.left_pid->controller.inc.actual;
@@ -556,15 +559,17 @@ static void wifi_pid_oscilloscope_send(void)
     wifi_pid_oscilloscope_buffer[3] = (float)run_debug_control.right_pid->controller.inc.target;
     wifi_pid_oscilloscope_buffer[4] = (float)run_debug_control.right_pid->controller.inc.actual;
     wifi_pid_oscilloscope_buffer[5] = (float)run_debug_control.right_pid->controller.inc.output;
-    wifi_pid_oscilloscope_buffer[6] = (float)*run_debug_control.track_slope;
-    wifi_pid_oscilloscope_buffer[7] = (float)*run_debug_control.planned_speed;
-    wifi_pid_oscilloscope_buffer[8] = (float)*run_debug_control.ramped_speed;
-    wifi_pid_oscilloscope_buffer[9] = (float)run_debug_control.gap_pid->controller.pos.output;
-    wifi_pid_oscilloscope_buffer[10] = (float)*run_debug_control.track_slope_valid;
-    wifi_pid_oscilloscope_buffer[11] = (float)*run_debug_control.straight_long;
-    wifi_pid_oscilloscope_buffer[12] = (float)*run_debug_control.cross;
-    wifi_pid_oscilloscope_buffer[13] = (float)*run_debug_control.ring_active;
-    wifi_pid_oscilloscope_buffer[14] = (float)*run_debug_control.ring_stage;
+    wifi_pid_oscilloscope_buffer[6] = (float)run_debug_control.gap_pid->controller.pos.target;
+    wifi_pid_oscilloscope_buffer[7] = (float)run_debug_control.gap_pid->controller.pos.actual;
+    wifi_pid_oscilloscope_buffer[8] = (float)run_debug_control.gap_pid->controller.pos.output;
+    wifi_pid_oscilloscope_buffer[9] = (float)*run_debug_control.track_slope;
+    wifi_pid_oscilloscope_buffer[10] = (float)*run_debug_control.planned_speed;
+    wifi_pid_oscilloscope_buffer[11] = (float)*run_debug_control.ramped_speed;
+    wifi_pid_oscilloscope_buffer[12] = (float)*run_debug_control.track_slope_valid;
+    wifi_pid_oscilloscope_buffer[13] = (float)*run_debug_control.straight_long;
+    track_element_state = (uint8)(*run_debug_control.cross
+                        + (uint8)(*run_debug_control.ring_active << 1));
+    wifi_pid_oscilloscope_buffer[14] = (float)track_element_state;
     wifi_pid_oscilloscope_buffer[15] = (float)*run_debug_control.line_lost;
 
     interrupt_global_enable(interrupt_state);
