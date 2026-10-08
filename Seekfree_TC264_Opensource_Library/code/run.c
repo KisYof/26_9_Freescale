@@ -16,8 +16,8 @@
 #define RUN_STALL_TARGET_MIN (20)      // 目标速度大于 20cm/s 才谈堵转
 #define RUN_STALL_SPEED_MAX (5)        // 实际速度绝对值小于 5cm/s 视为停转
 #define RUN_SPEED_LIMIT (1000)         // 目标速度限幅
-#define RUN_SPEED_ACCEL_STEP (2)       // 10ms 加速步长，保守初值，需实车标定
-#define RUN_SPEED_DECEL_STEP (6)       // 10ms 减速步长，必须大于加速步长，需实车标定
+#define RUN_SPEED_ACCEL_STEP (8)       // 10ms 加速步长，保守初值，需实车标定
+#define RUN_SPEED_DECEL_STEP (10)       // 10ms 减速步长，必须大于加速步长，需实车标定
 #define SPEED_MID (200)                // 调试层默认目标速度
 #define STEER_OUTPUT_MAP_SCALE (0.20)  // 转向输出换算成舵机角的缩放系数
 
@@ -26,11 +26,11 @@
 #define RUN_CURVE_SLOPE_LOW (150)          // 轻弯起点 S1
 #define RUN_CURVE_SLOPE_MID (500)          // 中弯分段点 S2
 #define RUN_CURVE_SLOPE_HIGH (1000)        // 急弯分段点 S3
-#define RUN_SPEED_CURVE_MILD (150)         // 未确认长直道/中等弯道的速度上限
-#define RUN_SPEED_CURVE_MIN (150)          // 急弯最低速度上限
-#define RUN_SPEED_UNKNOWN_LIMIT (150)      // slope 无效时的保守速度上限
-#define RUN_SPEED_CROSS_LIMIT (150)        // 十字速度上限
-#define RUN_SPEED_RING_LIMIT (170)         // 环岛速度上限
+#define RUN_SPEED_CURVE_MILD (160)         // 未确认长直道/中等弯道的速度上限
+#define RUN_SPEED_CURVE_MIN (160)          // 急弯最低速度上限
+#define RUN_SPEED_UNKNOWN_LIMIT (160)      // slope 无效时的保守速度上限
+#define RUN_SPEED_CROSS_LIMIT (160)        // 十字速度上限
+#define RUN_SPEED_RING_LIMIT (160)         // 环岛速度上限
 #define RUN_SPEED_LINE_LOST_LIMIT (120)    // 丢线时的安全速度上限
 #define RUN_STRAIGHT_CONFIRM_FRAMES (4U)   // 连续有效视觉帧数，约 80ms（按 50fps 估算）
 
