@@ -73,7 +73,7 @@ void hardware_update_2ms(void)
     hardware_feedback.raw_left_speed = CALC_LINE_SPEED_CM_S(-encoder_get_count(ENCODER_1));
     encoder_clear_count(ENCODER_1);
 
-    hardware_feedback.raw_right_speed = CALC_LINE_SPEED_CM_S(encoder_get_count(ENCODER_2));
+    hardware_feedback.raw_right_speed = CALC_LINE_SPEED_CM_S(-encoder_get_count(ENCODER_2));
     encoder_clear_count(ENCODER_2);
 }
 
