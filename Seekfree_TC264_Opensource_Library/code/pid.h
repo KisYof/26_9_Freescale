@@ -120,6 +120,7 @@ typedef struct {
     double ki_max;                                       // 推理出的 Ki 上限
     double kd_min;                                       // 推理出的 Kd 下限
     double kd_max;                                       // 推理出的 Kd 上限
+    double delta_error_limit;                            // >0: clamp EC for inference and D; 0: unlimited
     double integral_min;                                 // 积分累加下限，防积分饱和
     double integral_max;                                 // 积分累加上限
     double output_min;                                   // 输出下限
@@ -140,7 +141,7 @@ typedef struct {
     double target;            // 目标值
     double actual;            // 实际值
     double error;             // 本次误差 E = target - actual
-    double delta_error;       // 误差变化率 EC = error - last_error
+    double delta_error;       /* EC may be limited by config.delta_error_limit. */ // 误差变化率 EC = error - last_error
     double last_error;        // 上次误差，供下周期计算 EC
     double error_integral;    // 积分累加值，已按 integral_min/max 限幅
     double output;            // 本周期输出，已按 output_min/max 限幅

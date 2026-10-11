@@ -524,8 +524,7 @@ static double fuzzy_pid_infer_gain(
     {
         if (strengths[index] > 0.0)
         {
-            double gain = fuzzy_pid_clamp(
-                base_gain + offsets[consequents[index]], gain_min, gain_max);
+            double gain = offsets[consequents[index]];
             numerator += strengths[index] * gain;
             denominator += strengths[index];
         }
@@ -534,7 +533,7 @@ static double fuzzy_pid_infer_gain(
     // 强度全为 0（不应出现）：退回限幅后的基础增益
     if (denominator <= 0.0)
         return fuzzy_pid_clamp(base_gain, gain_min, gain_max);
-    return numerator / denominator;
+    return fuzzy_pid_clamp(base_gain + numerator / denominator, gain_min, gain_max);
 }
 
 // 载入参考模糊表：E/EC 的 7 档论域、Kp/Ki/Kd 的 7 档偏移量和 3 张 7x7 规则表，
@@ -617,6 +616,7 @@ void FuzzyPID_Config_InitReference(FuzzyPID_Config_t *config)
     config->ki_max = 100.0;
     config->kd_min = 0.0;
     config->kd_max = 100.0;
+    config->delta_error_limit = 0.0; // opt-in; preserve the reference controller EC
     config->integral_min = -10000.0;
     config->integral_max = 10000.0;
     config->output_min = -10000.0;
@@ -688,6 +688,12 @@ double FuzzyPID_Calc(FuzzyPID_Controller_t *controller,
     controller->delta_error = controller->error - controller->last_error; // EC = 本次 E - 上次 E
 
     // E 与 EC 在一次计算中只模糊化一次，三个增益共享结果
+    // The same limited discrete EC drives both inference and the final D term.
+    if (controller->config.delta_error_limit > 0.0)
+        controller->delta_error = fuzzy_pid_clamp(
+            controller->delta_error, -controller->config.delta_error_limit,
+            controller->config.delta_error_limit);
+
     error_membership = fuzzy_pid_fuzzify(
         controller->error, controller->config.error_points);
     delta_membership = fuzzy_pid_fuzzify(
