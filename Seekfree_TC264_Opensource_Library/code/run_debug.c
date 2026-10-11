@@ -1,5 +1,8 @@
 #include "run_debug.h"
 #include "camera.h"
+#if RUN_STEER_FUZZY_ENABLE
+#include <math.h>
+#endif
 #if RUN_UART_PID_DEBUG_ENABLE
 #include "uart_cmd.h"
 #endif
@@ -152,7 +155,11 @@ void run_debug_init(const run_debug_control_ref_t *control)
     (void)ucmd_reg_double(&pid_debug_cmd, "rki", &run_debug_control.right_pid->controller.inc.Ki);
     (void)ucmd_reg_double(&pid_debug_cmd, "rkd", &run_debug_control.right_pid->controller.inc.Kd);
     (void)ucmd_reg_double(&pid_debug_cmd, "dkp", &run_debug_control.gap_pid->controller.pos.Kp);
+#if RUN_STEER_FUZZY_ENABLE
+    (void)ucmd_reg_double_range(&pid_debug_cmd, "dki", &run_debug_control.gap_pid->controller.pos.Ki, 0.0, 0.0);
+#else
     (void)ucmd_reg_double(&pid_debug_cmd, "dki", &run_debug_control.gap_pid->controller.pos.Ki);
+#endif
     (void)ucmd_reg_double(&pid_debug_cmd, "dkd", &run_debug_control.gap_pid->controller.pos.Kd);
 #endif
 
@@ -314,7 +321,11 @@ static void run_debug_draw_layout(void)
     ips200_show_string(112, 104, "KI:");
     ips200_show_string(112, 124, "KD:");
 
+#if RUN_STEER_FUZZY_ENABLE
+    ips200_show_string(0, 168, "FUZZY PD BASE");
+#else
     ips200_show_string(0, 168, "STEER PID");
+#endif
     ips200_show_string(0, 188, "KP:");
     ips200_show_string(0, 208, "KI:");
     ips200_show_string(0, 228, "KD:");
@@ -531,9 +542,25 @@ static void wifi_debug_param_while(void)
             }
             else
             {
+#if RUN_STEER_FUZZY_ENABLE
+                // 方向 Ki 固定为零；拒绝非有限基准值，避免把 NaN/Inf 带入控制。
+                if (WIFI_PARAM_KP == index)
+                {
+                    if (isfinite(value)) run_debug_control.gap_pid->controller.pos.Kp = (double)value;
+                    wifi_debug_param.data[WIFI_PARAM_KP] = (float)run_debug_control.gap_pid->controller.pos.Kp;
+                }
+                if (WIFI_PARAM_KD == index)
+                {
+                    if (isfinite(value)) run_debug_control.gap_pid->controller.pos.Kd = (double)value;
+                    wifi_debug_param.data[WIFI_PARAM_KD] = (float)run_debug_control.gap_pid->controller.pos.Kd;
+                }
+                run_debug_control.gap_pid->controller.pos.Ki = 0.0;
+                wifi_debug_param.data[WIFI_PARAM_KI] = 0.0f;
+#else
                 if (WIFI_PARAM_KP == index) run_debug_control.gap_pid->controller.pos.Kp = (double)value;
                 if (WIFI_PARAM_KI == index) run_debug_control.gap_pid->controller.pos.Ki = (double)value;
                 if (WIFI_PARAM_KD == index) run_debug_control.gap_pid->controller.pos.Kd = (double)value;
+#endif
             }
 
             wifi_debug_param.update_flag[index] = 0;
@@ -571,6 +598,19 @@ static void wifi_pid_oscilloscope_send(void)
                         + (uint8)(*run_debug_control.ring_active << 1));
     wifi_pid_oscilloscope_buffer[14] = (float)track_element_state;
     wifi_pid_oscilloscope_buffer[15] = (float)*run_debug_control.line_lost;
+
+#if (RUN_STEER_FUZZY_ENABLE && RUN_STEER_FUZZY_DEBUG_ENABLE)
+    // 可选观测模式：6=E, 7=受限 EC, 8=u, 9=Kp_eff, 12=Kd_eff, 13=饱和。
+    // 0~5 双轮、10~11 速度、14~15 元素/丢线保持原顺序；默认模式完全兼容。
+    wifi_pid_oscilloscope_buffer[6] = (float)run_debug_control.fuzzy_gap->error;
+    wifi_pid_oscilloscope_buffer[7] = (float)run_debug_control.fuzzy_gap->delta_error;
+    wifi_pid_oscilloscope_buffer[8] = (float)run_debug_control.fuzzy_gap->output;
+    wifi_pid_oscilloscope_buffer[9] = (float)run_debug_control.fuzzy_gap->active_kp;
+    wifi_pid_oscilloscope_buffer[12] = (float)run_debug_control.fuzzy_gap->active_kd;
+    wifi_pid_oscilloscope_buffer[13] =
+        (run_debug_control.fuzzy_gap->output >= run_debug_control.fuzzy_gap->config.output_max
+         || run_debug_control.fuzzy_gap->output <= run_debug_control.fuzzy_gap->config.output_min) ? 1.0f : 0.0f;
+#endif
 
     interrupt_global_enable(interrupt_state);
     seekfree_assistant_oscilloscope_send(&wifi_pid_oscilloscope);

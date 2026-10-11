@@ -7,6 +7,16 @@
 // 1ms 基础调度、2ms 双轮速度 PID、10ms 方向 PID、堵转和视觉超时保护。
 // 状态只允许在控制中断里改写，主循环通过 run_get_status() 只读。
 
+// 1: 模糊 PD；0: 原位置式 PD (1.4 / 0 / 0.5)，重编译后切换。
+#ifndef RUN_STEER_FUZZY_ENABLE
+#define RUN_STEER_FUZZY_ENABLE (0)
+#endif
+
+// 0: 原 16 通道；1: 将方向组及部分规划通道切换为模糊 PD 观测量。
+#ifndef RUN_STEER_FUZZY_DEBUG_ENABLE
+#define RUN_STEER_FUZZY_DEBUG_ENABLE (1)
+#endif
+
 // ------------------ 调试功能开关：1=开启，0=关闭 ------------------
 #define RUN_WIFI_IMAGE_ENABLE     (1)   // WiFi 图像、边线、控制中线和前瞻标记传输
 #define RUN_WIFI_PID_DEBUG_ENABLE (1)   // WiFi PID 参数调节与示波器传输

@@ -17,7 +17,10 @@ typedef struct
     volatile int16 *speed_setting;  // 目标速度，改这里即可改变设定值
     PID_Controller_t *left_pid;     // 左轮速度环
     PID_Controller_t *right_pid;    // 右轮速度环
-    PID_Controller_t *gap_pid;      // 转向（中线偏差）环
+    PID_Controller_t *gap_pid;      // 原 PD / 模糊 PD 基准参数与兼容观测通道
+#if RUN_STEER_FUZZY_ENABLE
+    const FuzzyPID_Controller_t *fuzzy_gap; // 模糊 PD 的实时 E、EC、有效增益和输出
+#endif
     const volatile int16 *planned_speed; // Speed Planner 输出
     const volatile int16 *ramped_speed;  // 非对称斜坡后的基础速度
     const volatile int16 *track_slope;   // 当前一致视觉快照中的弯道趋势

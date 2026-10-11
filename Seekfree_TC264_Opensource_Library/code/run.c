@@ -80,7 +80,10 @@ static uint32 run_speed_planner_frame_sequence = 0;
 // 三路 PID：左右轮速度环为增量式，转向环为位置式
 static PID_Controller_t pid_left;
 static PID_Controller_t pid_right;
-static PID_Controller_t pid_gap;
+static PID_Controller_t pid_gap; // 模糊模式下保留基准参数和原调试通道，不执行普通 PID
+#if RUN_STEER_FUZZY_ENABLE
+static FuzzyPID_Controller_t fuzzy_gap;
+#endif
 
 // 编码器滤波：滑动平均窗口 + 一阶低通；steer_input_filter 用于中线偏差
 #define ENCODER_FILTER_WINDOW (20)
@@ -106,6 +109,70 @@ static int16 run_calc_safety_speed_limit(const run_vision_struct *vision);
 static int16 run_speed_planner(const run_vision_struct *vision);
 static void run_update_speed_ramp(int16 target_speed);
 
+#if RUN_STEER_FUZZY_ENABLE
+// 初始启发式标定，E/EC 保持现有误差单位和 10ms 离散差分，不除以秒。
+static void run_init_fuzzy_direction(void)
+{
+    static const double error_points[FUZZY_PID_LEVEL_COUNT] =
+        {-70.0, -45.0, -20.0, 0.0, 20.0, 45.0, 70.0};
+    static const double delta_points[FUZZY_PID_LEVEL_COUNT] =
+        {-16.0, -9.0, -4.0, 0.0, 4.0, 9.0, 16.0};
+    static const double kp_offsets[FUZZY_PID_LEVEL_COUNT] =
+        {-0.35, -0.25, -0.10, 0.0, 0.10, 0.22, 0.30};
+    static const double kd_offsets[FUZZY_PID_LEVEL_COUNT] =
+        {-0.18, -0.12, -0.07, 0.0, 0.07, 0.12, 0.18};
+    static const unsigned char kp_rules[FUZZY_PID_LEVEL_COUNT][FUZZY_PID_LEVEL_COUNT] =
+    {
+        {6, 5, 5, 5, 3, 3, 2},
+        {5, 5, 4, 4, 3, 3, 2},
+        {4, 4, 3, 2, 2, 2, 1},
+        {1, 1, 2, 2, 2, 1, 1},
+        {1, 2, 2, 2, 3, 4, 4},
+        {2, 3, 3, 4, 4, 5, 5},
+        {2, 3, 3, 5, 5, 5, 6}
+    };
+    static const unsigned char kd_rules[FUZZY_PID_LEVEL_COUNT][FUZZY_PID_LEVEL_COUNT] =
+    {
+        {2, 2, 2, 3, 4, 5, 5},
+        {2, 2, 3, 4, 5, 5, 6},
+        {2, 3, 3, 4, 5, 5, 6},
+        {2, 2, 2, 1, 2, 2, 2},
+        {6, 5, 5, 4, 3, 3, 2},
+        {6, 5, 5, 4, 3, 2, 2},
+        {5, 5, 4, 3, 2, 2, 2}
+    };
+    FuzzyPID_Config_t config;
+    unsigned char row;
+    unsigned char column;
+
+    FuzzyPID_Config_InitReference(&config);
+    for (row = 0; row < FUZZY_PID_LEVEL_COUNT; row++)
+    {
+        config.error_points[row] = error_points[row];
+        config.delta_error_points[row] = delta_points[row];
+        config.kp_offsets[row] = kp_offsets[row];
+        config.ki_offsets[row] = 0.0;
+        config.kd_offsets[row] = kd_offsets[row];
+        for (column = 0; column < FUZZY_PID_LEVEL_COUNT; column++)
+        {
+            config.kp_rules[row][column] = kp_rules[row][column];
+            config.ki_rules[row][column] = 3U;
+            config.kd_rules[row][column] = kd_rules[row][column];
+        }
+    }
+    config.kp_min = 0.85;
+    config.kp_max = 1.65;
+    config.ki_min = config.ki_max = 0.0;
+    config.kd_min = 0.12;
+    config.kd_max = 0.60;
+    config.delta_error_limit = 16.0;
+    config.integral_min = config.integral_max = 0.0;
+    config.output_min = -90.0;
+    config.output_max = 90.0;
+    FuzzyPID_Init(&fuzzy_gap, &config, 1.25, 0.0, 0.36);
+}
+#endif
+
 // 上电调用一次：初始化硬件、三路 PID、编码器滤波，注册调试引用，
 // 进入空闲态后再启动 1ms 基础调度中断与 10ms 调试中断。
 void run_init(void)
@@ -117,7 +184,12 @@ void run_init(void)
     // 保持当前左右轮速度 PID 与方向 PID 参数不变，本次 Speed Planner 只调整目标速度。
     PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3500, -3500, 0, 0);
     PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3500, -3500, 0, 0);
+#if RUN_STEER_FUZZY_ENABLE
+    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.25, 0.0, 0.36, 90, -90, 0, 0);
+    run_init_fuzzy_direction();
+#else
     PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.4, 0.0, 0.5, 90, -90, 0, 0);
+#endif
 
     // 滑动平均窗口与三个一阶滤波器全部清零
     filter_ring_init(&encoder_left_ring, encoder_left_buffer, ENCODER_FILTER_WINDOW);
@@ -131,6 +203,9 @@ void run_init(void)
     debug_control.left_pid = &pid_left;
     debug_control.right_pid = &pid_right;
     debug_control.gap_pid = &pid_gap;
+#if RUN_STEER_FUZZY_ENABLE
+    debug_control.fuzzy_gap = &fuzzy_gap;
+#endif
     debug_control.planned_speed = &run_planned_speed;
     debug_control.ramped_speed = &speed;
     debug_control.track_slope = &run_vision.track_slope;
@@ -183,6 +258,9 @@ static void run_enter_state(run_state_enum state)
     PID_Controller_Reset(&pid_left);
     PID_Controller_Reset(&pid_right);
     PID_Controller_Reset(&pid_gap);
+#if RUN_STEER_FUZZY_ENABLE
+    FuzzyPID_Reset(&fuzzy_gap);
+#endif
     filter_rc_state_reset(&steer_input_filter);
     run_held_mid_error = 0;
     run_direction_gap = 0;
@@ -239,7 +317,23 @@ static void run_update_direction(void)
         run_held_mid_error = run_vision.mid_error;
 
     filtered_mid_error = filter_rc_low_pass(&steer_input_filter, (float)run_held_mid_error, 1);
+#if RUN_STEER_FUZZY_ENABLE
+    // 调参仍写原 pid_gap 的 Kp/Kd；下一次 10ms 周期使用新基准值，Ki 永久为零。
+    pid_gap.controller.pos.Ki = 0.0;
+    FuzzyPID_SetBaseGains(&fuzzy_gap, pid_gap.controller.pos.Kp, 0.0,
+                         pid_gap.controller.pos.Kd);
+    // E = 0 - filtered_mid_error；重复视觉误差时 EC 自动归零。
+    run_direction_gap = FuzzyPID_Calc(&fuzzy_gap, 0, (double)filtered_mid_error);
+    // 同步原 target / actual / output 调试通道，保持上位机和串口数据顺序。
+    pid_gap.controller.pos.target = fuzzy_gap.target;
+    pid_gap.controller.pos.actual = fuzzy_gap.actual;
+    pid_gap.controller.pos.output = fuzzy_gap.output;
+    pid_gap.controller.pos.Error1 = pid_gap.controller.pos.Error0;
+    pid_gap.controller.pos.Error0 = fuzzy_gap.error;
+    pid_gap.controller.pos.ErrorInt = 0.0;
+#else
     run_direction_gap = PID_Controller_Calc(&pid_gap, 0, (double)filtered_mid_error);
+#endif
 }
 
 // 返回最近一个 10ms 方向周期产生的方向输出，供 2ms 速度任务复用。
