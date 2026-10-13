@@ -9,12 +9,23 @@
 
 // 1: 模糊 PD；0: 原位置式 PD (1.4 / 0 / 0.5)，重编译后切换。
 #ifndef RUN_STEER_FUZZY_ENABLE
-#define RUN_STEER_FUZZY_ENABLE (0)
+#define RUN_STEER_FUZZY_ENABLE (1)
 #endif
 
 // 0: 原 16 通道；1: 将方向组及部分规划通道切换为模糊 PD 观测量。
 #ifndef RUN_STEER_FUZZY_DEBUG_ENABLE
 #define RUN_STEER_FUZZY_DEBUG_ENABLE (1)
+#endif
+
+// 1: 新速度规划；0: 原版速度映射/直道许可。安全修复始终保留。
+#ifndef RUN_SPEED_PLANNER_ENABLE
+#define RUN_SPEED_PLANNER_ENABLE (1)
+#endif
+
+// 0: 保留原示波器通道；1: 速度规划观测，优先于模糊 PD 调试模式。
+// 模式 1: 6=risk, 7=curve limit, 13=straight confirmed，其余通道不变。
+#ifndef RUN_SPEED_PLANNER_DEBUG_ENABLE
+#define RUN_SPEED_PLANNER_DEBUG_ENABLE (0)
 #endif
 
 // ------------------ 调试功能开关：1=开启，0=关闭 ------------------
@@ -36,7 +47,8 @@ typedef enum
     RUN_FAULT_NONE = 0,           // 无故障
     RUN_FAULT_STALL_LEFT = 1,     // 左轮堵转（位 0）
     RUN_FAULT_STALL_RIGHT = 2,    // 右轮堵转（位 1）
-    RUN_FAULT_VISION_TIMEOUT = 4  // 视觉数据超时（位 2）
+    RUN_FAULT_VISION_TIMEOUT = 4, // 视觉数据超时（位 2）
+    RUN_FAULT_VISION_STOP = 8     // 视觉持续丢线停车（位 3），重新上电清除
 } run_fault_enum;
 
 // 运行状态快照，故障时保留现场数据供事后分析

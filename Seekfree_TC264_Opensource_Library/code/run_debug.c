@@ -346,7 +346,8 @@ static void run_debug_draw_values(const run_status_struct *status)
         default: break;
     }
     // 故障字段是位标志，左右轮堵转可能同时置位
-    if (status->fault & RUN_FAULT_VISION_TIMEOUT) fault_text = "VISION TIMEOUT ";
+    if (status->fault & RUN_FAULT_VISION_STOP) fault_text = "VISION STOP    ";
+    else if (status->fault & RUN_FAULT_VISION_TIMEOUT) fault_text = "VISION TIMEOUT ";
     else if ((status->fault & 3U) == 3U) fault_text = "STALL BOTH     ";
     else if (status->fault & RUN_FAULT_STALL_LEFT) fault_text = "STALL LEFT     ";
     else if (status->fault & RUN_FAULT_STALL_RIGHT) fault_text = "STALL RIGHT    ";
@@ -599,7 +600,13 @@ static void wifi_pid_oscilloscope_send(void)
     wifi_pid_oscilloscope_buffer[14] = (float)track_element_state;
     wifi_pid_oscilloscope_buffer[15] = (float)*run_debug_control.line_lost;
 
-#if (RUN_STEER_FUZZY_ENABLE && RUN_STEER_FUZZY_DEBUG_ENABLE)
+#if RUN_SPEED_PLANNER_DEBUG_ENABLE
+    // V2 仍为 16 通道：保留双轮 target/actual/PWM、gap、原始 slope、计划和斜坡速度。
+    // 编译期切换后须在会话元数据标明：6=risk, 7=curve limit, 13=straight confirmed。
+    wifi_pid_oscilloscope_buffer[6] = (float)*run_debug_control.curve_risk;
+    wifi_pid_oscilloscope_buffer[7] = (float)*run_debug_control.curve_speed_limit;
+    wifi_pid_oscilloscope_buffer[13] = (float)*run_debug_control.straight_confirmed;
+#elif (RUN_STEER_FUZZY_ENABLE && RUN_STEER_FUZZY_DEBUG_ENABLE)
     // 可选观测模式：6=E, 7=受限 EC, 8=u, 9=Kp_eff, 12=Kd_eff, 13=饱和。
     // 0~5 双轮、10~11 速度、14~15 元素/丢线保持原顺序；默认模式完全兼容。
     wifi_pid_oscilloscope_buffer[6] = (float)run_debug_control.fuzzy_gap->error;

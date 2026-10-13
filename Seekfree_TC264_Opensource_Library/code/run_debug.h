@@ -23,6 +23,9 @@ typedef struct
 #endif
     const volatile int16 *planned_speed; // Speed Planner 输出
     const volatile int16 *ramped_speed;  // 非对称斜坡后的基础速度
+    const volatile int16 *curve_risk;     // 速度规划专用风险
+    const volatile int16 *curve_speed_limit;
+    const volatile uint8 *straight_confirmed;
     const volatile int16 *track_slope;   // 当前一致视觉快照中的弯道趋势
     const volatile uint8 *track_slope_valid;
     const volatile uint8 *straight_long;
