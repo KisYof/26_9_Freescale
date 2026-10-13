@@ -171,7 +171,7 @@ static const uint8 Vision_ProspectRow[VP_COUNT] =
     30,     // 普通赛道
     32,     // 十字：看中间
     30,     // 斑马线
-    45,     // 圆环入口
+    40,     // 圆环入口
     42,     // 圆环内部
     45,     // 大圆环内部
     25      // 圆环出口
@@ -2622,7 +2622,7 @@ void Element_Handle_Right_Rings(void)
     int ring_right_ref;
     uint8 *half_table;
 
-    /* 默认按小圆环处理，但不覆盖已经判断出的大圆环 */
+    /* 默认按小圆环处理，不覆盖已经判断出的大圆环 */
     if (ImageFlag.ring_big_small == 0)
     {
         ImageFlag.ring_big_small = 1;
@@ -2647,7 +2647,6 @@ void Element_Handle_Right_Rings(void)
         }
     }
 
-    /* 判断第二个交点是否已经出现 */
     point_gap =
         Right_RingsFlag_Point1_Ysite -
         Right_RingsFlag_Point2_Ysite;
@@ -2664,7 +2663,7 @@ void Element_Handle_Right_Rings(void)
         right_second_corner_seen = 1;
     }
 
-    /* 第一个交点只准备，不马上入环 */
+    /* 准备进环 */
     if (ImageFlag.image_element_rings_flag == 1)
     {
         right_entry_hold++;
@@ -2675,7 +2674,6 @@ void Element_Handle_Right_Rings(void)
             right_entry_hold = 0;
         }
     }
-    /* 第二个交点出现后进入状态5，或者超时强制进入 */
     else if (ImageFlag.image_element_rings_flag == 2)
     {
         right_entry_hold++;
@@ -2688,21 +2686,21 @@ void Element_Handle_Right_Rings(void)
         }
     }
 
-    /* 进环：5 -> 6 */
+    /* 进环 */
     if (ImageFlag.image_element_rings_flag == 5 &&
         ImageStatus.Miss_Left_lines > 15)
     {
         ImageFlag.image_element_rings_flag = 6;
     }
 
-    /* 进环完成：6 -> 7 */
+    /* 进环完成 */
     if (ImageFlag.image_element_rings_flag == 6 &&
         ImageStatus.Miss_Left_lines < 7)
     {
         ImageFlag.image_element_rings_flag = 7;
     }
 
-    /* 环内定位：7 -> 8 */
+    /* 环内定位 */
     if (ImageFlag.image_element_rings_flag == 7)
     {
         Point_Xsite = 0;
@@ -2737,7 +2735,7 @@ void Element_Handle_Right_Rings(void)
         }
     }
 
-    /* 出环判断：8 -> 9 */
+    /* 准备出环 */
     if (ImageFlag.image_element_rings_flag == 8)
     {
         if (Straight_Judge(1,
@@ -2778,7 +2776,7 @@ void Element_Handle_Right_Rings(void)
 
     /***************************************处理**************************************/
 
-    /* 准备进环：1~4，走正常中线，不在第一个交点提前拐 */
+    /* 准备进环：1~4，仍走正常中线，不提前拐 */
     if (ImageFlag.image_element_rings_flag >= 1 &&
         ImageFlag.image_element_rings_flag <= 4)
     {
@@ -2798,7 +2796,7 @@ void Element_Handle_Right_Rings(void)
         }
     }
 
-    /* 进环和环内：5、6、7 */
+    /* 进环和环内：5、6、7，加入逐行向右渐变 */
     if (ImageFlag.image_element_rings_flag == 5 ||
         ImageFlag.image_element_rings_flag == 6 ||
         ImageFlag.image_element_rings_flag == 7)
@@ -2813,10 +2811,9 @@ void Element_Handle_Right_Rings(void)
         }
 
         offset = Right_Ring_HalfWide_Offset;
-
         ring_right_ref = 0;
 
-        /* 先用近处几行找可靠的外侧右边线 */
+        /* 先找一条稳定的外侧右边线 */
         for (int Ysite = 55; Ysite <= 69; Ysite++)
         {
             if (ImageDeal[Ysite].RightBorder > ring_right_ref)
@@ -2832,19 +2829,48 @@ void Element_Handle_Right_Rings(void)
 
         for (int Ysite = 69; Ysite > 20; Ysite--)
         {
-            int right = ImageDeal[Ysite].RightBorder;
+            int normal_center;
+            int ring_center;
+            int blend;
             int center;
+            int right = ImageDeal[Ysite].RightBorder;
 
-            /* 只接受右半边外侧边线，内侧岛边线不要拿来当中线依据 */
+            /* 只接受右半边外侧边线 */
             if (right > ImageSensorMid &&
                 right < LCDW - 2)
             {
                 ring_right_ref = right;
             }
 
-            center = ring_right_ref -
-                     half_table[Ysite] +
-                     offset;
+            /* 原来的正常中线 */
+            normal_center =
+                ImageDeal[Ysite].LeftBorder +
+                Half_Road_Wide[Ysite];
+
+            /* 你画的右侧环内目标中线方向 */
+            ring_center =
+                ring_right_ref +
+                Right_Ring_HalfWide_Offset;
+
+            /*
+             * Ysite = 69：blend = 0，走正常中线
+             * Ysite 越往上：blend 越大，越靠右
+             */
+            blend = 69 - Ysite;
+
+            if (blend < 0)
+            {
+                blend = 0;
+            }
+
+            if (blend > 40)
+            {
+                blend = 40;
+            }
+
+            center = normal_center +
+                     (ring_center - normal_center) *
+                     blend / 40;
 
             LimitL(center);
             LimitH(center);
@@ -2866,10 +2892,8 @@ void Element_Handle_Right_Rings(void)
         }
 
         offset = Right_Ring_HalfWide_Offset - 10;
-
         ring_right_ref = 0;
 
-        /* 出环也锁外侧右边线，避免中线突然跳到左边 */
         for (int Ysite = 55; Ysite <= 69; Ysite++)
         {
             if (ImageDeal[Ysite].RightBorder > ring_right_ref)
