@@ -1,17 +1,12 @@
 #include "run_debug.h"
 #include "camera.h"
-#if RUN_STEER_FUZZY_ENABLE
 #include <math.h>
-#endif
 #if RUN_UART_PID_DEBUG_ENABLE
 #include "uart_cmd.h"
 #endif
 
-// 调试层：按键、IPS200 显示、WiFi 图像与示波器、串口 PID 调参。
-// 只通过 run_debug_control_ref_t 读写控制层参数，本身不参与滤波和控制运算。
-
-#define RUN_DEBUG_REFRESH_TICKS (50U) // 500ms 刷新一次参数
-#define RUN_KEY_DEBOUNCE_TICKS (3U)   // 按下、松开均稳定 30ms
+// 通信适配器：仅 WiFi 图传、示波器和串口调参。没有按键和屏幕代码。
+// run 层提供一致快照和统一参数提交接口；run_ui 与本模块互不依赖。
 
 // ------------------ 串口 PID 文本调参 ------------------
 #if RUN_UART_PID_DEBUG_ENABLE
@@ -45,32 +40,14 @@ typedef enum
     WIFI_PARAM_COUNT
 } wifi_debug_param_index_enum;
 
-// 一次只编辑一组 PID，避免参数表过大
-typedef enum
-{
-    WIFI_PID_GROUP_LEFT = 0,    // 左轮速度环
-    WIFI_PID_GROUP_RIGHT,       // 右轮速度环
-    WIFI_PID_GROUP_STEER,       // 转向环
-    WIFI_PID_GROUP_COUNT
-} wifi_pid_group_enum;
 #endif
 
-// 控制层引用，保存指针，调参直接改 run 层的 PID 和目标速度
-static run_debug_control_ref_t run_debug_control;
-
-// 按键事件与消抖状态：10ms 中断写入，主循环取出后清零
-static const gpio_pin_enum run_key_pin[] = KEY_LIST;
-static volatile uint8 run_debug_key_event = 0;
-static volatile uint8 run_debug_refresh_request = 0;
-static uint8 run_debug_refresh_count = 0;
-static uint8 run_key_press_count = 0;
-static uint8 run_key_release_count = 0;
-static uint8 run_key_ready = 0;
-
-// 屏幕状态：布局只画一次，状态或故障变化时强制刷新数值
-static uint8 run_debug_drawn = 0;
-static run_state_enum run_debug_last_state = RUN_STATE_IDLE;
-static uint8 run_debug_last_fault = RUN_FAULT_NONE;
+#if (RUN_WIFI_PID_DEBUG_ENABLE || RUN_UART_PID_DEBUG_ENABLE)
+static run_monitor_t debug_monitor;
+#endif
+#if (RUN_WIFI_IMAGE_ENABLE || RUN_WIFI_PID_DEBUG_ENABLE)
+static uint8 wifi_connected;
+#endif
 
 // 10ms 中断置位、主循环清零，保证每个周期最多发送一次
 #if (RUN_WIFI_PID_DEBUG_ENABLE || RUN_UART_PID_DEBUG_ENABLE)
@@ -80,6 +57,7 @@ static volatile uint8 pid_debug_send_flag = 0;
 // 串口命令上下文与回显缓冲
 #if RUN_UART_PID_DEBUG_ENABLE
 static ucmd_ctx_t pid_debug_cmd;
+static run_params_t uart_params;
 static char pid_debug_text[128];
 #endif
 
@@ -106,14 +84,10 @@ static seekfree_assistant_camera_boundary_struct wifi_reference_information;
 static seekfree_assistant_oscilloscope_struct wifi_pid_oscilloscope;
 static float wifi_pid_oscilloscope_buffer[WIFI_PID_OSCILLOSCOPE_CHANNEL_NUM];
 static seekfree_assistant_debug_param_struct wifi_debug_param;
-static uint8 wifi_pid_group = WIFI_PID_GROUP_STEER;
+static run_pid_group_enum wifi_pid_group = RUN_PID_STEER;
 #endif
 
 // ------------------ 内部函数前向声明 ------------------
-static void run_debug_draw_layout(void);                      // 画固定界面框架，只执行一次
-static void run_debug_draw_values(const run_status_struct *status); // 刷新状态、故障与 PID 数值
-static void run_debug_ui_while(const run_status_struct *status);    // 屏幕刷新调度
-
 #if RUN_UART_PID_DEBUG_ENABLE
 static void pid_debug_uart_receive(void);
 static void pid_debug_uart_reply(const char *text);
@@ -121,7 +95,7 @@ static void pid_debug_send(void);
 #endif
 
 #if (RUN_WIFI_IMAGE_ENABLE || RUN_WIFI_PID_DEBUG_ENABLE)
-static void wifi_module_init(void);
+static uint8 wifi_module_init(void);
 #endif
 
 #if RUN_WIFI_IMAGE_ENABLE
@@ -135,237 +109,96 @@ static void wifi_debug_param_load_group(uint8 group);
 static void wifi_pid_oscilloscope_send(void);
 #endif
 
-// 初始化调试层：保存控制层引用，按开关注册串口调参命令、连接 WiFi，最后初始化按键并请求首次绘屏。
-// 此时 5ms/10ms 控制中断尚未启动，因此允许在这里阻塞等待 WiFi 连接。
-void run_debug_init(const run_debug_control_ref_t *control)
+// 初始化通信，基本控制和摄像头此时已就绪。网络失败后离线继续。
+void run_debug_init(void)
 {
-    run_debug_control = *control;
-
 #if RUN_UART_PID_DEBUG_ENABLE
     uart_init(PID_DEBUG_UART, PID_DEBUG_UART_BAUD,
               PID_DEBUG_UART_TX_PIN, PID_DEBUG_UART_RX_PIN);
     ucmd_init(&pid_debug_cmd, PID_DEBUG_UART, pid_debug_uart_reply);
 
-    // 注册可调参数：目标速度 + 三组 PID 各自的 Kp/Ki/Kd
-    (void)ucmd_reg_int16(&pid_debug_cmd, "spd", (int16 *)run_debug_control.speed_setting);
-    (void)ucmd_reg_double(&pid_debug_cmd, "lkp", &run_debug_control.left_pid->controller.inc.Kp);
-    (void)ucmd_reg_double(&pid_debug_cmd, "lki", &run_debug_control.left_pid->controller.inc.Ki);
-    (void)ucmd_reg_double(&pid_debug_cmd, "lkd", &run_debug_control.left_pid->controller.inc.Kd);
-    (void)ucmd_reg_double(&pid_debug_cmd, "rkp", &run_debug_control.right_pid->controller.inc.Kp);
-    (void)ucmd_reg_double(&pid_debug_cmd, "rki", &run_debug_control.right_pid->controller.inc.Ki);
-    (void)ucmd_reg_double(&pid_debug_cmd, "rkd", &run_debug_control.right_pid->controller.inc.Kd);
-    (void)ucmd_reg_double(&pid_debug_cmd, "dkp", &run_debug_control.gap_pid->controller.pos.Kp);
+    run_get_params(&uart_params);
+    (void)ucmd_reg_int16_range(&pid_debug_cmd, "spd", &uart_params.speed, 0, RUN_PARAM_SPEED_MAX);
+    (void)ucmd_reg_double_range(&pid_debug_cmd, "lkp", &uart_params.pid[RUN_PID_LEFT].kp, 0, RUN_PARAM_GAIN_MAX);
+    (void)ucmd_reg_double_range(&pid_debug_cmd, "lki", &uart_params.pid[RUN_PID_LEFT].ki, 0, RUN_PARAM_GAIN_MAX);
+    (void)ucmd_reg_double_range(&pid_debug_cmd, "lkd", &uart_params.pid[RUN_PID_LEFT].kd, 0, RUN_PARAM_GAIN_MAX);
+    (void)ucmd_reg_double_range(&pid_debug_cmd, "rkp", &uart_params.pid[RUN_PID_RIGHT].kp, 0, RUN_PARAM_GAIN_MAX);
+    (void)ucmd_reg_double_range(&pid_debug_cmd, "rki", &uart_params.pid[RUN_PID_RIGHT].ki, 0, RUN_PARAM_GAIN_MAX);
+    (void)ucmd_reg_double_range(&pid_debug_cmd, "rkd", &uart_params.pid[RUN_PID_RIGHT].kd, 0, RUN_PARAM_GAIN_MAX);
+    (void)ucmd_reg_double_range(&pid_debug_cmd, "dkp", &uart_params.pid[RUN_PID_STEER].kp, 0, RUN_PARAM_GAIN_MAX);
 #if RUN_STEER_FUZZY_ENABLE
-    (void)ucmd_reg_double_range(&pid_debug_cmd, "dki", &run_debug_control.gap_pid->controller.pos.Ki, 0.0, 0.0);
+    (void)ucmd_reg_double_range(&pid_debug_cmd, "dki", &uart_params.pid[RUN_PID_STEER].ki, 0, 0);
 #else
-    (void)ucmd_reg_double(&pid_debug_cmd, "dki", &run_debug_control.gap_pid->controller.pos.Ki);
+    (void)ucmd_reg_double_range(&pid_debug_cmd, "dki", &uart_params.pid[RUN_PID_STEER].ki, 0, RUN_PARAM_GAIN_MAX);
 #endif
-    (void)ucmd_reg_double(&pid_debug_cmd, "dkd", &run_debug_control.gap_pid->controller.pos.Kd);
+    (void)ucmd_reg_double_range(&pid_debug_cmd, "dkd", &uart_params.pid[RUN_PID_STEER].kd, 0, RUN_PARAM_GAIN_MAX);
 #endif
 
 #if (RUN_WIFI_IMAGE_ENABLE || RUN_WIFI_PID_DEBUG_ENABLE)
-    wifi_module_init();
+    wifi_connected = wifi_module_init();
 #endif
 #if RUN_WIFI_PID_DEBUG_ENABLE
-    wifi_debug_param_init();
+    if (wifi_connected)
+    {
+        wifi_debug_param_init();
+    }
 #endif
 
-    // 按键扫描周期 10ms，与 10ms 中断一致；先丢弃上电瞬间的毛刺按键
-    key_init(10);
-    run_debug_discard_keys();
-    run_debug_refresh_request = 1;
-    run_debug_refresh_count = 0;
-    run_debug_drawn = 0;
 }
 
-// 主循环轮询的低频任务：收串口命令、收 WiFi 调参、刷屏、发示波器与图像。
-// 只读运行状态（run_get_status），控制运算全部在 5ms 中断里完成。
 void run_debug_while(void)
 {
-    run_status_struct status;
-
 #if RUN_UART_PID_DEBUG_ENABLE
+    run_params_t before;
+    run_get_params(&uart_params);
+    before = uart_params;
     pid_debug_uart_receive();
     ucmd_poll(&pid_debug_cmd);
+    if (!run_params_equal(&before, &uart_params))
+    {
+        if (!run_apply_params(&uart_params))
+        {
+            ucmd_send_text(&pid_debug_cmd, "ERR: stop car; invalid or busy parameters\r\n");
+        }
+        run_get_params(&uart_params);
+    }
 #endif
-
 #if RUN_WIFI_PID_DEBUG_ENABLE
-    wifi_debug_param_while();
+    if (wifi_connected)
+    {
+        wifi_debug_param_while();
+    }
 #endif
-
-    run_get_status(&status);
-    run_debug_ui_while(&status);
-
 #if (RUN_WIFI_PID_DEBUG_ENABLE || RUN_UART_PID_DEBUG_ENABLE)
-    if (pid_debug_send_flag == 1)
+    if (pid_debug_send_flag)
     {
         pid_debug_send_flag = 0;
+        // 先取一致快照，再恢复中断后格式化和发送，避免通信阻塞控制。
+        run_get_monitor(&debug_monitor);
 #if RUN_UART_PID_DEBUG_ENABLE
         pid_debug_send();
 #endif
 #if RUN_WIFI_PID_DEBUG_ENABLE
-        wifi_pid_oscilloscope_send();
+        if (wifi_connected)
+        {
+            wifi_pid_oscilloscope_send();
+        }
 #endif
     }
 #endif
-
 #if RUN_WIFI_IMAGE_ENABLE
-    wifi_image_while();
+    if (wifi_connected)
+    {
+        wifi_image_while();
+    }
 #endif
 }
 
-// 10ms 中断只扫描按键并设置低频任务标志。
 void run_debug_tick_10ms(void)
 {
-    uint32 interrupt_state = interrupt_global_disable();
-
-    if (KEY_RELEASE_LEVEL == gpio_get_level(run_key_pin[0]))
-    {
-        run_key_press_count = 0;
-        if (run_key_release_count < RUN_KEY_DEBOUNCE_TICKS)
-            run_key_release_count++;
-        if (run_key_release_count >= RUN_KEY_DEBOUNCE_TICKS)
-            run_key_ready = 1;
-    }
-    else
-    {
-        run_key_release_count = 0;
-        if (run_key_ready)
-        {
-            if (++run_key_press_count >= RUN_KEY_DEBOUNCE_TICKS)
-            {
-                run_key_ready = 0;
-                run_debug_key_event |= RUN_KEY_START_STOP;
-            }
-        }
-    }
-
-    // 500ms 请求一次界面刷新，由主循环执行绘制
-    if (++run_debug_refresh_count >= RUN_DEBUG_REFRESH_TICKS)
-    {
-        run_debug_refresh_count = 0;
-        run_debug_refresh_request = 1;
-    }
 #if (RUN_WIFI_PID_DEBUG_ENABLE || RUN_UART_PID_DEBUG_ENABLE)
     pid_debug_send_flag = 1;
 #endif
-    interrupt_global_enable(interrupt_state);
-}
-
-// 丢弃未处理的按键事件与消抖计数，状态切换（如故障）时调用，避免把停车键带进新状态。
-void run_debug_discard_keys(void)
-{
-    uint32 interrupt_state = interrupt_global_disable();
-    run_debug_key_event = 0;
-    run_key_ready = 0;
-    run_key_press_count = 0;
-    run_key_release_count = 0;
-    interrupt_global_enable(interrupt_state);
-}
-
-// 原子取出并清空按键事件，返回 RUN_KEY_* 位标志；关中断保护，避免与 10ms 中断竞争。
-uint8 run_debug_take_keys(void)
-{
-    uint8 events;
-    uint32 interrupt_state = interrupt_global_disable();
-    events = run_debug_key_event;
-    run_debug_key_event = 0;
-    interrupt_global_enable(interrupt_state);
-    return events;
-}
-
-// 屏幕刷新调度：首次进入先画布局，之后按 500ms 刷新标志或状态/故障变化重画数值。
-static void run_debug_ui_while(const run_status_struct *status)
-{
-    uint8 refresh;
-    uint32 interrupt_state = interrupt_global_disable();
-    refresh = run_debug_refresh_request;
-    run_debug_refresh_request = 0;
-    interrupt_global_enable(interrupt_state);
-
-    if (!run_debug_drawn)
-    {
-        // 首次进入补画一次固定布局
-        run_debug_draw_layout();
-        run_debug_drawn = 1;
-        refresh = 1;
-    }
-    // 状态或故障变化时立即刷新，不必等 500ms 周期
-    if (status->state != run_debug_last_state || status->fault != run_debug_last_fault)
-        refresh = 1;
-    if (refresh)
-    {
-        run_debug_draw_values(status);
-        run_debug_last_state = status->state;
-        run_debug_last_fault = status->fault;
-    }
-}
-
-// 绘制固定界面框架：标题、状态区、左右轮与转向三组 PID 标签、按键说明；只在首次进入执行。
-static void run_debug_draw_layout(void)
-{
-    ips200_set_color(RGB565_BLACK, RGB565_WHITE);
-    ips200_clear();
-
-    ips200_show_string(0, 0, "RUN CONTROL");
-    ips200_draw_line(0, 18, 199, 18, RGB565_BLACK);
-    ips200_show_string(0, 28, "STATE:");
-
-    ips200_show_string(0, 64, "LEFT PID");
-    ips200_show_string(0, 84, "KP:");
-    ips200_show_string(0, 104, "KI:");
-    ips200_show_string(0, 124, "KD:");
-
-    ips200_show_string(112, 64, "RIGHT PID");
-    ips200_show_string(112, 84, "KP:");
-    ips200_show_string(112, 104, "KI:");
-    ips200_show_string(112, 124, "KD:");
-
-#if RUN_STEER_FUZZY_ENABLE
-    ips200_show_string(0, 168, "FUZZY PD BASE");
-#else
-    ips200_show_string(0, 168, "STEER PID");
-#endif
-    ips200_show_string(0, 188, "KP:");
-    ips200_show_string(0, 208, "KI:");
-    ips200_show_string(0, 228, "KD:");
-
-    ips200_show_string(0, 284, "KEY1: START / STOP");
-}
-
-// 刷新可变内容：运行状态、故障说明（按位标志转成文字）以及三组 PID 数值。
-static void run_debug_draw_values(const run_status_struct *status)
-{
-    const char *state_text = "IDLE    ";
-    const char *fault_text = "NONE           ";
-
-    switch (status->state)
-    {
-        case RUN_STATE_RUNNING: state_text = "RUNNING "; break;
-        case RUN_STATE_FAULT: state_text = "FAULT   "; break;
-        default: break;
-    }
-    // 故障字段是位标志，左右轮堵转可能同时置位
-    if (status->fault & RUN_FAULT_VISION_STOP) fault_text = "VISION STOP    ";
-    else if (status->fault & RUN_FAULT_VISION_TIMEOUT) fault_text = "VISION TIMEOUT ";
-    else if ((status->fault & 3U) == 3U) fault_text = "STALL BOTH     ";
-    else if (status->fault & RUN_FAULT_STALL_LEFT) fault_text = "STALL LEFT     ";
-    else if (status->fault & RUN_FAULT_STALL_RIGHT) fault_text = "STALL RIGHT    ";
-
-    ips200_show_string(56, 28, state_text);
-    ips200_show_string(0, 46, fault_text);
-
-    ips200_show_float(32, 84, run_debug_control.left_pid->controller.inc.Kp, 2, 2);
-    ips200_show_float(32, 104, run_debug_control.left_pid->controller.inc.Ki, 2, 2);
-    ips200_show_float(32, 124, run_debug_control.left_pid->controller.inc.Kd, 2, 2);
-
-    ips200_show_float(144, 84, run_debug_control.right_pid->controller.inc.Kp, 2, 2);
-    ips200_show_float(144, 104, run_debug_control.right_pid->controller.inc.Ki, 2, 2);
-    ips200_show_float(144, 124, run_debug_control.right_pid->controller.inc.Kd, 2, 2);
-
-    ips200_show_float(32, 188, run_debug_control.gap_pid->controller.pos.Kp, 2, 2);
-    ips200_show_float(32, 208, run_debug_control.gap_pid->controller.pos.Ki, 2, 2);
-    ips200_show_float(32, 228, run_debug_control.gap_pid->controller.pos.Kd, 2, 2);
 }
 
 #if RUN_UART_PID_DEBUG_ENABLE
@@ -390,41 +223,35 @@ static void pid_debug_send(void)
 {
     (void)snprintf(pid_debug_text, sizeof(pid_debug_text),
                    "s:%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\r\n",
-                   run_debug_control.left_pid->controller.inc.target,
-                   run_debug_control.left_pid->controller.inc.actual,
-                   run_debug_control.left_pid->controller.inc.output,
-                   run_debug_control.right_pid->controller.inc.target,
-                   run_debug_control.right_pid->controller.inc.actual,
-                   run_debug_control.right_pid->controller.inc.output,
-                   run_debug_control.gap_pid->controller.pos.target,
-                   run_debug_control.gap_pid->controller.pos.actual,
-                   run_debug_control.gap_pid->controller.pos.output);
+                   debug_monitor.pid_values[0],
+                   debug_monitor.pid_values[1],
+                   debug_monitor.pid_values[2],
+                   debug_monitor.pid_values[3],
+                   debug_monitor.pid_values[4],
+                   debug_monitor.pid_values[5],
+                   debug_monitor.pid_values[6],
+                   debug_monitor.pid_values[7],
+                   debug_monitor.pid_values[8]);
     ucmd_send_text(&pid_debug_cmd, pid_debug_text);
 }
 #endif
 
 #if (RUN_WIFI_IMAGE_ENABLE || RUN_WIFI_PID_DEBUG_ENABLE)
 // 连接 WiFi 与 TCP 服务器，并初始化上位机的图像、示波器、可调参数接口。
-static void wifi_module_init(void)
+static uint8 wifi_module_init(void)
 {
-    // 初始化阶段允许等待连接成功；车辆控制中断此时尚未启动。
-    while (wifi_spi_init(WIFI_IMAGE_SSID, WIFI_IMAGE_PASSWORD))
+    // 只尝试连接一次，失败后离线继续；库函数内部仍有同步超时等待。
+    // 两项 WiFi 宏均关闭时，编译期排除整条联网路径。
+    if (wifi_spi_init(WIFI_IMAGE_SSID, WIFI_IMAGE_PASSWORD))
     {
-        printf("\r\n connect wifi failed.\r\n");
-        system_delay_ms(100);
+        printf("\r\nWiFi unavailable: continuing offline.\r\n");
+        return 0;
     }
-
-    if (1 != WIFI_SPI_AUTO_CONNECT)
+    if (1 != WIFI_SPI_AUTO_CONNECT && wifi_spi_socket_connect(
+            "TCP", WIFI_IMAGE_TARGET_IP, WIFI_IMAGE_TARGET_PORT, WIFI_IMAGE_LOCAL_PORT))
     {
-        while (wifi_spi_socket_connect(
-                    "TCP",
-                    WIFI_IMAGE_TARGET_IP,
-                    WIFI_IMAGE_TARGET_PORT,
-                    WIFI_IMAGE_LOCAL_PORT))
-        {
-            printf("\r\n connect image TCP server failed.\r\n");
-            system_delay_ms(100);
-        }
+        printf("\r\nTCP unavailable: continuing offline.\r\n");
+        return 0;
     }
 
     seekfree_assistant_interface_init(SEEKFREE_ASSISTANT_WIFI_SPI);
@@ -453,121 +280,100 @@ static void wifi_module_init(void)
         wifi_spi_ip_addr_port,
         WIFI_IMAGE_TARGET_IP,
         WIFI_IMAGE_TARGET_PORT);
+    return 1;
 }
 #endif
 
 #if RUN_WIFI_PID_DEBUG_ENABLE
-// 参数表初始化：写入当前目标速度与默认编辑组，并把该组 PID 参数同步到上位机。
+// 与本地 UI 共用参数提交接口，仅空闲且无启动请求时接受更新。
 static void wifi_debug_param_init(void)
 {
+    run_params_t p;
+    run_get_params(&p);
     memset(&wifi_debug_param, 0, sizeof(wifi_debug_param));
-    wifi_debug_param.data[WIFI_PARAM_SPEED] = (float)*run_debug_control.speed_setting;
+    wifi_debug_param.data[WIFI_PARAM_SPEED] = (float)p.speed;
     wifi_debug_param.data[WIFI_PARAM_PID_GROUP] = (float)wifi_pid_group;
     wifi_debug_param_load_group(wifi_pid_group);
 }
 
-// 按组号把对应 PID 的 Kp/Ki/Kd 填入上位机参数表，供界面显示和修改。
 static void wifi_debug_param_load_group(uint8 group)
 {
-    if (WIFI_PID_GROUP_LEFT == group)
-    {
-        wifi_debug_param.data[WIFI_PARAM_KP] = (float)run_debug_control.left_pid->controller.inc.Kp;
-        wifi_debug_param.data[WIFI_PARAM_KI] = (float)run_debug_control.left_pid->controller.inc.Ki;
-        wifi_debug_param.data[WIFI_PARAM_KD] = (float)run_debug_control.left_pid->controller.inc.Kd;
-    }
-    else if (WIFI_PID_GROUP_RIGHT == group)
-    {
-        wifi_debug_param.data[WIFI_PARAM_KP] = (float)run_debug_control.right_pid->controller.inc.Kp;
-        wifi_debug_param.data[WIFI_PARAM_KI] = (float)run_debug_control.right_pid->controller.inc.Ki;
-        wifi_debug_param.data[WIFI_PARAM_KD] = (float)run_debug_control.right_pid->controller.inc.Kd;
-    }
-    else
-    {
-        wifi_debug_param.data[WIFI_PARAM_KP] = (float)run_debug_control.gap_pid->controller.pos.Kp;
-        wifi_debug_param.data[WIFI_PARAM_KI] = (float)run_debug_control.gap_pid->controller.pos.Ki;
-        wifi_debug_param.data[WIFI_PARAM_KD] = (float)run_debug_control.gap_pid->controller.pos.Kd;
-    }
+    run_params_t p;
+    run_get_params(&p);
+    wifi_debug_param.data[WIFI_PARAM_SPEED] = (float)p.speed;
+    wifi_debug_param.data[WIFI_PARAM_KP] = (float)p.pid[group].kp;
+    wifi_debug_param.data[WIFI_PARAM_KI] = (float)p.pid[group].ki;
+    wifi_debug_param.data[WIFI_PARAM_KD] = (float)p.pid[group].kd;
 }
 
-// 解析上位机下发的参数更新：速度直接写目标值，PID 按当前组号写回对应控制器。
-// 写入过程关中断，避免与 1ms 基础调度中断读到半截数据。
 static void wifi_debug_param_while(void)
 {
-    uint8 index;
+    uint8 i;
+    uint8 changed = 0;
+    uint8 valid = 1;
+    run_params_t p;
+    float value;
     seekfree_assistant_debug_param_analysis(&wifi_debug_param);
-
-    for (index = 0; index < WIFI_PARAM_COUNT; index++)
+    run_get_params(&p);
+    if (wifi_debug_param.update_flag[WIFI_PARAM_PID_GROUP])
     {
-        if (wifi_debug_param.update_flag[index])
+        value = wifi_debug_param.data[WIFI_PARAM_PID_GROUP];
+        if (isfinite(value) && value >= 0 && value < RUN_PID_GROUP_COUNT)
         {
-            float value = wifi_debug_param.data[index];
-            uint32 interrupt_state = interrupt_global_disable();
-
-            if (WIFI_PARAM_SPEED == index)
+            wifi_pid_group = (run_pid_group_enum)value;
+        }
+        else
+        {
+            valid = 0;
+        }
+    }
+    for (i = 0; i < WIFI_PARAM_COUNT; ++i)
+    {
+        if (!wifi_debug_param.update_flag[i])
+        {
+            continue;
+        }
+        value = wifi_debug_param.data[i];
+        if (!isfinite(value))
+        {
+            valid = 0;
+        }
+        else if (i == WIFI_PARAM_SPEED)
+        {
+            if (value < 0 || value > RUN_PARAM_SPEED_MAX)
             {
-                *run_debug_control.speed_setting = (int16)value;
-            }
-            else if (WIFI_PARAM_PID_GROUP == index)
-            {
-                int16 group = (int16)value;
-                // 组号越界时钳位到合法范围
-                if (group < WIFI_PID_GROUP_LEFT)
-                {
-                    group = WIFI_PID_GROUP_LEFT;
-                }
-                else if (group >= WIFI_PID_GROUP_COUNT)
-                {
-                    group = WIFI_PID_GROUP_STEER;
-                }
-                wifi_pid_group = (uint8)group;
-                wifi_debug_param.data[WIFI_PARAM_PID_GROUP] = (float)wifi_pid_group;
-                // 只切组、没带 PID 参数时，重新读该组当前值回显
-                if (!wifi_debug_param.update_flag[WIFI_PARAM_KP]
-                    && !wifi_debug_param.update_flag[WIFI_PARAM_KI]
-                    && !wifi_debug_param.update_flag[WIFI_PARAM_KD])
-                {
-                    wifi_debug_param_load_group(wifi_pid_group);
-                }
-            }
-            else if (WIFI_PID_GROUP_LEFT == wifi_pid_group)
-            {
-                if (WIFI_PARAM_KP == index) run_debug_control.left_pid->controller.inc.Kp = (double)value;
-                if (WIFI_PARAM_KI == index) run_debug_control.left_pid->controller.inc.Ki = (double)value;
-                if (WIFI_PARAM_KD == index) run_debug_control.left_pid->controller.inc.Kd = (double)value;
-            }
-            else if (WIFI_PID_GROUP_RIGHT == wifi_pid_group)
-            {
-                if (WIFI_PARAM_KP == index) run_debug_control.right_pid->controller.inc.Kp = (double)value;
-                if (WIFI_PARAM_KI == index) run_debug_control.right_pid->controller.inc.Ki = (double)value;
-                if (WIFI_PARAM_KD == index) run_debug_control.right_pid->controller.inc.Kd = (double)value;
+                valid = 0;
             }
             else
             {
-#if RUN_STEER_FUZZY_ENABLE
-                // 方向 Ki 固定为零；拒绝非有限基准值，避免把 NaN/Inf 带入控制。
-                if (WIFI_PARAM_KP == index)
-                {
-                    if (isfinite(value)) run_debug_control.gap_pid->controller.pos.Kp = (double)value;
-                    wifi_debug_param.data[WIFI_PARAM_KP] = (float)run_debug_control.gap_pid->controller.pos.Kp;
-                }
-                if (WIFI_PARAM_KD == index)
-                {
-                    if (isfinite(value)) run_debug_control.gap_pid->controller.pos.Kd = (double)value;
-                    wifi_debug_param.data[WIFI_PARAM_KD] = (float)run_debug_control.gap_pid->controller.pos.Kd;
-                }
-                run_debug_control.gap_pid->controller.pos.Ki = 0.0;
-                wifi_debug_param.data[WIFI_PARAM_KI] = 0.0f;
-#else
-                if (WIFI_PARAM_KP == index) run_debug_control.gap_pid->controller.pos.Kp = (double)value;
-                if (WIFI_PARAM_KI == index) run_debug_control.gap_pid->controller.pos.Ki = (double)value;
-                if (WIFI_PARAM_KD == index) run_debug_control.gap_pid->controller.pos.Kd = (double)value;
-#endif
+                p.speed = (int16)value;
             }
-
-            wifi_debug_param.update_flag[index] = 0;
-            interrupt_global_enable(interrupt_state);
+            changed = 1;
         }
+        else if (i >= WIFI_PARAM_KP)
+        {
+            if (i == WIFI_PARAM_KP)
+            {
+                p.pid[wifi_pid_group].kp = value;
+            }
+            if (i == WIFI_PARAM_KI)
+            {
+                p.pid[wifi_pid_group].ki = value;
+            }
+            if (i == WIFI_PARAM_KD)
+            {
+                p.pid[wifi_pid_group].kd = value;
+            }
+            changed = 1;
+        }
+        wifi_debug_param.update_flag[i] = 0;
     }
+    if (changed && valid)
+    {
+        (void)run_apply_params(&p);
+    }
+    wifi_debug_param.data[WIFI_PARAM_PID_GROUP] = (float)wifi_pid_group;
+    wifi_debug_param_load_group(wifi_pid_group);
 }
 
 // WiFi 示波器通道：0~8 = 左轮、右轮、方向环三组 target、actual、output；
@@ -578,48 +384,45 @@ static void wifi_debug_param_while(void)
 // PID 参数仍通过参数表在线查看/修改，不再占用示波器通道。
 static void wifi_pid_oscilloscope_send(void)
 {
-    uint32 interrupt_state = interrupt_global_disable();
     uint8 track_element_state;
 
-    wifi_pid_oscilloscope_buffer[0] = (float)run_debug_control.left_pid->controller.inc.target;
-    wifi_pid_oscilloscope_buffer[1] = (float)run_debug_control.left_pid->controller.inc.actual;
-    wifi_pid_oscilloscope_buffer[2] = (float)run_debug_control.left_pid->controller.inc.output;
-    wifi_pid_oscilloscope_buffer[3] = (float)run_debug_control.right_pid->controller.inc.target;
-    wifi_pid_oscilloscope_buffer[4] = (float)run_debug_control.right_pid->controller.inc.actual;
-    wifi_pid_oscilloscope_buffer[5] = (float)run_debug_control.right_pid->controller.inc.output;
-    wifi_pid_oscilloscope_buffer[6] = (float)run_debug_control.gap_pid->controller.pos.target;
-    wifi_pid_oscilloscope_buffer[7] = (float)run_debug_control.gap_pid->controller.pos.actual;
-    wifi_pid_oscilloscope_buffer[8] = (float)run_debug_control.gap_pid->controller.pos.output;
-    wifi_pid_oscilloscope_buffer[9] = (float)*run_debug_control.track_slope;
-    wifi_pid_oscilloscope_buffer[10] = (float)*run_debug_control.planned_speed;
-    wifi_pid_oscilloscope_buffer[11] = (float)*run_debug_control.ramped_speed;
-    wifi_pid_oscilloscope_buffer[12] = (float)*run_debug_control.track_slope_valid;
-    wifi_pid_oscilloscope_buffer[13] = (float)*run_debug_control.straight_long;
-    track_element_state = (uint8)(*run_debug_control.cross
-                        + (uint8)(*run_debug_control.ring_active << 1));
+    wifi_pid_oscilloscope_buffer[0] = (float)debug_monitor.pid_values[0];
+    wifi_pid_oscilloscope_buffer[1] = (float)debug_monitor.pid_values[1];
+    wifi_pid_oscilloscope_buffer[2] = (float)debug_monitor.pid_values[2];
+    wifi_pid_oscilloscope_buffer[3] = (float)debug_monitor.pid_values[3];
+    wifi_pid_oscilloscope_buffer[4] = (float)debug_monitor.pid_values[4];
+    wifi_pid_oscilloscope_buffer[5] = (float)debug_monitor.pid_values[5];
+    wifi_pid_oscilloscope_buffer[6] = (float)debug_monitor.pid_values[6];
+    wifi_pid_oscilloscope_buffer[7] = (float)debug_monitor.pid_values[7];
+    wifi_pid_oscilloscope_buffer[8] = (float)debug_monitor.pid_values[8];
+    wifi_pid_oscilloscope_buffer[9] = (float)debug_monitor.track_slope;
+    wifi_pid_oscilloscope_buffer[10] = (float)debug_monitor.planned_speed;
+    wifi_pid_oscilloscope_buffer[11] = (float)debug_monitor.ramped_speed;
+    wifi_pid_oscilloscope_buffer[12] = (float)debug_monitor.track_slope_valid;
+    wifi_pid_oscilloscope_buffer[13] = (float)debug_monitor.straight_long;
+    track_element_state = (uint8)(debug_monitor.cross
+                        + (uint8)(debug_monitor.ring_active << 1));
     wifi_pid_oscilloscope_buffer[14] = (float)track_element_state;
-    wifi_pid_oscilloscope_buffer[15] = (float)*run_debug_control.line_lost;
+    wifi_pid_oscilloscope_buffer[15] = (float)debug_monitor.line_lost;
 
 #if RUN_SPEED_PLANNER_DEBUG_ENABLE
     // V2 仍为 16 通道：保留双轮 target/actual/PWM、gap、原始 slope、计划和斜坡速度。
     // 编译期切换后须在会话元数据标明：6=risk, 7=curve limit, 13=straight confirmed。
-    wifi_pid_oscilloscope_buffer[6] = (float)*run_debug_control.curve_risk;
-    wifi_pid_oscilloscope_buffer[7] = (float)*run_debug_control.curve_speed_limit;
-    wifi_pid_oscilloscope_buffer[13] = (float)*run_debug_control.straight_confirmed;
+    wifi_pid_oscilloscope_buffer[6] = (float)debug_monitor.curve_risk;
+    wifi_pid_oscilloscope_buffer[7] = (float)debug_monitor.curve_speed_limit;
+    wifi_pid_oscilloscope_buffer[13] = (float)debug_monitor.straight_confirmed;
 #elif (RUN_STEER_FUZZY_ENABLE && RUN_STEER_FUZZY_DEBUG_ENABLE)
     // 可选观测模式：6=E, 7=受限 EC, 8=u, 9=Kp_eff, 12=Kd_eff, 13=饱和。
     // 0~5 双轮、10~11 速度、14~15 元素/丢线保持原顺序；默认模式完全兼容。
-    wifi_pid_oscilloscope_buffer[6] = (float)run_debug_control.fuzzy_gap->error;
-    wifi_pid_oscilloscope_buffer[7] = (float)run_debug_control.fuzzy_gap->delta_error;
-    wifi_pid_oscilloscope_buffer[8] = (float)run_debug_control.fuzzy_gap->output;
-    wifi_pid_oscilloscope_buffer[9] = (float)run_debug_control.fuzzy_gap->active_kp;
-    wifi_pid_oscilloscope_buffer[12] = (float)run_debug_control.fuzzy_gap->active_kd;
+    wifi_pid_oscilloscope_buffer[6] = (float)debug_monitor.fuzzy_error;
+    wifi_pid_oscilloscope_buffer[7] = (float)debug_monitor.fuzzy_delta;
+    wifi_pid_oscilloscope_buffer[8] = (float)debug_monitor.fuzzy_output;
+    wifi_pid_oscilloscope_buffer[9] = (float)debug_monitor.fuzzy_kp;
+    wifi_pid_oscilloscope_buffer[12] = (float)debug_monitor.fuzzy_kd;
     wifi_pid_oscilloscope_buffer[13] =
-        (run_debug_control.fuzzy_gap->output >= run_debug_control.fuzzy_gap->config.output_max
-         || run_debug_control.fuzzy_gap->output <= run_debug_control.fuzzy_gap->config.output_min) ? 1.0f : 0.0f;
+        (float)debug_monitor.fuzzy_saturated;
 #endif
 
-    interrupt_global_enable(interrupt_state);
     seekfree_assistant_oscilloscope_send(&wifi_pid_oscilloscope);
 }
 #endif

@@ -15,8 +15,7 @@ typedef struct
 } hardware_feedback_t;
 
 void hardware_init(void);                                    // 一次性初始化电机、编码器、舵机，须在控制中断启动前调用
-void hardware_update_2ms(void);                              // 由 2ms 速度任务调用：读取脉冲、换算 cm/s、清空计数器
-void hardware_get_feedback(hardware_feedback_t *feedback);   // 取出最近一次采样的左右轮原始速度
+void hardware_sample_2ms(hardware_feedback_t *feedback);      // 一次采样并返回左右轮原始速度，固定 2ms 调用
 void hardware_reset_feedback(void);                          // 清空编码器脉冲与速度反馈，启动/重跑前调用
 void hardware_set_motors(int16 left_duty, int16 right_duty); // 输出左右电机占空比（0~10000），正负号决定转向
 void hardware_set_servo(int16 angle);                        // 设置舵机角度（0 为中位），内部限幅后换算成占空比

@@ -41,13 +41,10 @@
 #error "SERVO_MOTOR_FREQ ERROE!"
 #endif
 
-// 速度反馈，只在 5ms 中断内写入和读取，主循环不直接访问
-static hardware_feedback_t hardware_feedback;
-
 static void hardware_set_left_motor(int16 duty);
 static void hardware_set_right_motor(int16 duty);
 
-// 初始化全部硬件：电机方向脚与 17kHz PWM、两路正交编码器、50Hz 舵机，并清空速度反馈。
+// 初始化电机方向脚与 17kHz PWM、两路正交编码器、50Hz 舵机，并清空编码器计数。
 // 必须在控制中断启动之前调用一次，之后不再重复初始化。
 void hardware_init(void)
 {
@@ -66,30 +63,22 @@ void hardware_init(void)
     hardware_reset_feedback();
 }
 
-// 固定由 2ms 速度任务调用：读取脉冲、换算为 cm/s，并清空计数器。
+// 固定由 2ms 速度任务调用：采样并返回本周期反馈，随后清空编码器计数器。
 // 左轮编码器安装方向与右轮相反，取负号后统一为“正数=前进”。
-void hardware_update_2ms(void)
+void hardware_sample_2ms(hardware_feedback_t *feedback)
 {
-    hardware_feedback.raw_left_speed = CALC_LINE_SPEED_CM_S(-encoder_get_count(ENCODER_1));
+    feedback->raw_left_speed = CALC_LINE_SPEED_CM_S(-encoder_get_count(ENCODER_1));
     encoder_clear_count(ENCODER_1);
 
-    hardware_feedback.raw_right_speed = CALC_LINE_SPEED_CM_S(-encoder_get_count(ENCODER_2));
+    feedback->raw_right_speed = CALC_LINE_SPEED_CM_S(-encoder_get_count(ENCODER_2));
     encoder_clear_count(ENCODER_2);
 }
 
-// 取出最近一次采样的左右轮原始速度，供控制层做滤波和 PID 输入。
-void hardware_get_feedback(hardware_feedback_t *feedback)
-{
-    *feedback = hardware_feedback;
-}
-
-// 清零两路编码器脉冲与速度反馈，启动或重新进入运行状态前调用，避免用到残留数据。
+// 清零编码器脉冲；软件反馈和滤波状态由 run 统一复位，避免两层各留一份缓存。
 void hardware_reset_feedback(void)
 {
     encoder_clear_count(ENCODER_1);
     encoder_clear_count(ENCODER_2);
-    hardware_feedback.raw_left_speed = 0;
-    hardware_feedback.raw_right_speed = 0;
 }
 
 // 左右电机独立给定：正数前进、负数后退，duty 范围 0~10000 对应 0~100% 占空比。

@@ -36,7 +36,7 @@
 #pragma section all "cpu0_dsram"
 
 #include "Camera.h"
-#include "Camera_tool.h"
+
 
 #include "run.h"
 
@@ -74,8 +74,6 @@
 // 如果发现现象与说明严重不符 请参照本文件最下方 例程常见问题说明 进行排查
 // **************************** 代码区域 ****************************
 
-#define IPS200_TYPE     (IPS200_TYPE_SPI)                                       //  SPI 两寸屏 这里宏定义填写 IPS200_TYPE_SPI（第二排丝印是NC）
-                                                                                //  并口两寸屏 这里宏定义填写 IPS200_TYPE_PARALLEL8 （第二排丝印是D0 - D7）
 
 int core0_main(void)
 {
@@ -83,9 +81,8 @@ int core0_main(void)
     debug_init();                   // 初始化默认调试串口
     // 此处编写用户代码 例如外设初始化代码等
 
-    run_init();                     // 运行初始化函数
+    run_init();                     // 控制侧初始化，运行调度在首次 run_while 中启动
 
-    ips200_init(IPS200_TYPE);
     ips200_show_string(0, 0, "mt9v03x init."); //摄像头初始化
 
     while(1)
@@ -107,7 +104,7 @@ int core0_main(void)
     {
         // 此处编写需要循环执行的代码
 
-        run_while();                   // 运行循环函数
+        run_while();                // 摄像头和双核同步后统一轮询控制侧功能
 
 
         // 此处编写需要循环执行的代码

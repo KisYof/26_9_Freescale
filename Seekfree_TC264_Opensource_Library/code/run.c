@@ -1,9 +1,11 @@
 #include "run.h"
+#include "run_ui.h"
+#include "run_debug.h"
 #include "pid.h"
 #include "filter.h"
 #include "camera.h"
 #include "hardware.h"
-#include "run_debug.h"
+#include <math.h>
 
 #define MOTOR_STALL_PWM_THRESHOLD (1500) // 判定堵转所需的最小 PWM 幅值
 
@@ -15,7 +17,6 @@
 #define RUN_STALL_CONFIRM_TICKS (150U) // 速度任务计数：堵转条件连续成立 300ms 才确认
 #define RUN_STALL_TARGET_MIN (20)      // 目标速度大于 20cm/s 才谈堵转
 #define RUN_STALL_SPEED_MAX (5)        // 实际速度绝对值小于 5cm/s 视为停转
-#define RUN_SPEED_LIMIT (1000)         // 目标速度限幅
 #define RUN_SPEED_ACCEL_STEP (8)       // 10ms 加速步长，保守初值，需实车标定
 #define RUN_SPEED_DECEL_STEP (10)       // 10ms 减速步长，必须大于加速步长，需实车标定
 #define SPEED_MID (200)                // 调试层默认目标速度
@@ -49,7 +50,7 @@ volatile int16 raw_right = 0;
 volatile int16 encoder_left = 0;
 volatile int16 encoder_right = 0;
 int16 speed = 0;                                 // 斜坡爬升后真正执行的目标速度
-static volatile int16 speed_setting = SPEED_MID; // 目标速度设定值，可被 WiFi/串口在线修改
+static volatile int16 speed_setting = SPEED_MID; // 目标速度设定值，UI/WiFi/串口在空闲时通过参数接口修改
 static run_status_struct run_status = {RUN_STATE_IDLE, RUN_FAULT_NONE, 0, 0, 0, 0, 0, 0};
 
 // 运行层自己的视觉副本，只读取 camera 原有变量，不改动视觉模块。
@@ -91,6 +92,8 @@ static volatile int16 run_curve_risk = 0; // 速度规划专用绝对倾斜风�
 static uint32 run_curve_risk_x4 = 0;     // Q2 保留小数，下降权重 3/4
 #endif
 static uint32 run_speed_planner_frame_sequence = 0;
+static volatile uint8 run_ready = 0;
+static volatile uint8 run_toggle_request = 0;
 static uint8 run_start_pending = 0;     // KEY1 请求后等待 CPU1 完成原有复位接口
 static uint16 run_start_wait_ticks = 0; // 独立复位等待计时，不被持续来帧清零
 static uint32 run_start_frame_sequence = 0;
@@ -114,7 +117,6 @@ static filter_rc_state_t encoder_right_filter;
 static filter_rc_state_t steer_input_filter;
 
 // ------------------ 内部函数前向声明 ------------------
-static void run_stop_outputs(void);                // 停输出：电机停转、舵机回中
 static void run_request_start(void);               // 启动：清滤波、编码器与视觉计时
 static void run_enter_state(run_state_enum state); // 切状态：清计数、停输出、复位 PID 与滤波
 static void run_control_tick_1ms(void);            // 1ms 基础调度：方向到期时先执行，再执行速度任务
@@ -191,15 +193,23 @@ static void run_init_fuzzy_direction(void)
 }
 #endif
 
-// 上电调用一次：初始化硬件、三路 PID、编码器滤波，注册调试引用，
-// 进入空闲态后再启动 1ms 基础调度中断与 10ms 调试中断。
+// 启动和上电共用的反馈复位，不参与普通停车或故障现场记录。
+static void run_reset_speed_feedback(void)
+{
+    filter_ring_init(&encoder_left_ring, encoder_left_buffer, ENCODER_FILTER_WINDOW);
+    filter_ring_init(&encoder_right_ring, encoder_right_buffer, ENCODER_FILTER_WINDOW);
+    filter_rc_state_reset(&encoder_left_filter);
+    filter_rc_state_reset(&encoder_right_filter);
+    hardware_reset_feedback();
+    raw_left = raw_right = 0;
+    encoder_left = encoder_right = 0;
+}
+
+// 第一阶段：main 在摄像头初始化前调用，先保证执行器安全并准备屏幕。
+// 此处不启动定时器、不联网，摄像头重试期间不会响应启动请求。
 void run_init(void)
 {
-    run_debug_control_ref_t debug_control;
-
     hardware_init();
-
-    // 保持当前左右轮速度 PID 与方向 PID 参数不变，本次 Speed Planner 只调整目标速度。
     PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3500, -3500, 0, 0);
     PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3500, -3500, 0, 0);
 #if RUN_STEER_FUZZY_ENABLE
@@ -208,66 +218,176 @@ void run_init(void)
 #else
     PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.4, 0.0, 0.5, 90, -90, 0, 0);
 #endif
-
-    // 滑动平均窗口与三个一阶滤波器全部清零
-    filter_ring_init(&encoder_left_ring, encoder_left_buffer, ENCODER_FILTER_WINDOW);
-    filter_ring_init(&encoder_right_ring, encoder_right_buffer, ENCODER_FILTER_WINDOW);
-    filter_rc_state_reset(&encoder_left_filter);
-    filter_rc_state_reset(&encoder_right_filter);
-    filter_rc_state_reset(&steer_input_filter);
-
-    // 把可调参数的指针交给调试层，WiFi/串口改参即刻生效
-    debug_control.speed_setting = &speed_setting;
-    debug_control.left_pid = &pid_left;
-    debug_control.right_pid = &pid_right;
-    debug_control.gap_pid = &pid_gap;
-#if RUN_STEER_FUZZY_ENABLE
-    debug_control.fuzzy_gap = &fuzzy_gap;
-#endif
-    debug_control.planned_speed = &run_planned_speed;
-    debug_control.ramped_speed = &speed;
-    debug_control.track_slope = &run_vision.track_slope;
-    debug_control.curve_risk = &run_curve_risk;
-    debug_control.curve_speed_limit = &run_curve_speed_limit;
-    debug_control.straight_confirmed = &run_straight_confirmed;
-    debug_control.track_slope_valid = &run_vision.track_slope_valid;
-    debug_control.straight_long = &run_vision.straight_long;
-    debug_control.cross = &run_vision.cross;
-    debug_control.ring_active = &run_vision.ring_active;
-    debug_control.ring_stage = &run_vision.ring_stage;
-    debug_control.line_lost = &run_vision.line_lost;
-    run_debug_init(&debug_control);
-
-    // run_debug_init() 不绘屏；IPS200 初始化完成后，主循环才执行绘屏。
+    run_reset_speed_feedback();
+    run_ready = 0;
+    run_toggle_request = 0;
     run_enter_state(RUN_STATE_IDLE);
-
-    // WiFi 初始化等待已结束，控制对象也全部就绪后，再启动 1ms 基础调度和 10ms 调试中断。
-    pit_ms_init(CCU60_CH0, 1);
-    pit_ms_init(CCU60_CH1, 10);
+    run_ui_init();
 }
 
-// 主循环入口：控制运算全部在 1ms 基础调度中断里，这里只跑调试层的低频任务。
+// 第二阶段：main 必须在摄像头初始化和双核同步后才进入 run_while。
+// 先开放控制调度并绘制首屏，再初始化通信，网络等待不阻塞控制中断。
+static void run_start_runtime(void)
+{
+    run_toggle_request = 0;
+    run_ready = 1;
+    pit_ms_init(CCU60_CH0, 1);
+    pit_ms_init(CCU60_CH1, 10);
+    run_ui_while();
+    run_debug_init();
+}
+
 void run_while(void)
 {
+    if (!run_ready)
+    {
+        run_start_runtime();
+    }
+    run_ui_while();
     run_debug_while();
 }
 
-// 统一停输出：电机停转、舵机回中，任何非运行状态都调用它兜底。
-static void run_stop_outputs(void)
-{
-    hardware_stop();
-}
-
-// 关中断拷贝一份状态快照，保证读到的字段来自同一时刻。
-void run_get_status(run_status_struct *status)
+// 只投递事件；运行状态和执行器输出仍由控制中断决定。
+void run_request_toggle(void)
 {
     uint32 interrupt_state = interrupt_global_disable();
-    *status = run_status;
+    if (run_ready && RUN_STATE_FAULT != run_status.state)
+    {
+        run_toggle_request = 1;
+    }
+    interrupt_global_enable(interrupt_state);
+}
+
+// 短暂关中断复制参数，避免主循环读到控制中断正在使用的半个 double。
+void run_get_params(run_params_t *params)
+{
+    uint32 interrupt_state = interrupt_global_disable();
+    params->speed = speed_setting;
+    params->pid[RUN_PID_LEFT].kp = pid_left.controller.inc.Kp;
+    params->pid[RUN_PID_LEFT].ki = pid_left.controller.inc.Ki;
+    params->pid[RUN_PID_LEFT].kd = pid_left.controller.inc.Kd;
+    params->pid[RUN_PID_RIGHT].kp = pid_right.controller.inc.Kp;
+    params->pid[RUN_PID_RIGHT].ki = pid_right.controller.inc.Ki;
+    params->pid[RUN_PID_RIGHT].kd = pid_right.controller.inc.Kd;
+    params->pid[RUN_PID_STEER].kp = pid_gap.controller.pos.Kp;
+    params->pid[RUN_PID_STEER].ki = pid_gap.controller.pos.Ki;
+    params->pid[RUN_PID_STEER].kd = pid_gap.controller.pos.Kd;
+    interrupt_global_enable(interrupt_state);
+}
+
+// UI 的草稿冲突检查与串口的变更检测共用此规则，不比较结构体填充字节。
+uint8 run_params_equal(const run_params_t *left, const run_params_t *right)
+{
+    uint8 group;
+    if (left == NULL || right == NULL || left->speed != right->speed)
+    {
+        return 0;
+    }
+    for (group = 0; group < RUN_PID_GROUP_COUNT; group++)
+    {
+        if (left->pid[group].kp != right->pid[group].kp
+            || left->pid[group].ki != right->pid[group].ki
+            || left->pid[group].kd != right->pid[group].kd)
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// 先在临界区外校验数值，再原子检查状态并提交整组参数。
+// UI/通信不能直接改 PID 指针，运行或等待启动时一律拒绝更新。
+uint8 run_apply_params(const run_params_t *params)
+{
+    uint8 i;
+    uint32 interrupt_state;
+    if (!params || params->speed < 0 || params->speed > RUN_PARAM_SPEED_MAX)
+    {
+        return 0;
+    }
+    for (i = 0; i < RUN_PID_GROUP_COUNT; ++i)
+    {
+        if (!isfinite(params->pid[i].kp) || !isfinite(params->pid[i].ki) || !isfinite(params->pid[i].kd)
+            || params->pid[i].kp < 0 || params->pid[i].kp > RUN_PARAM_GAIN_MAX
+            || params->pid[i].ki < 0 || params->pid[i].ki > RUN_PARAM_GAIN_MAX
+            || params->pid[i].kd < 0 || params->pid[i].kd > RUN_PARAM_GAIN_MAX)
+        {
+            return 0;
+        }
+    }
+#if RUN_STEER_FUZZY_ENABLE
+    if (params->pid[RUN_PID_STEER].ki != 0.0)
+    {
+        return 0;
+    }
+#endif
+    interrupt_state = interrupt_global_disable();
+    if (RUN_STATE_IDLE != run_status.state || run_start_pending || run_toggle_request)
+    {
+        interrupt_global_enable(interrupt_state);
+        return 0;
+    }
+    speed_setting = params->speed;
+    pid_left.controller.inc.Kp = params->pid[RUN_PID_LEFT].kp;
+    pid_left.controller.inc.Ki = params->pid[RUN_PID_LEFT].ki;
+    pid_left.controller.inc.Kd = params->pid[RUN_PID_LEFT].kd;
+    pid_right.controller.inc.Kp = params->pid[RUN_PID_RIGHT].kp;
+    pid_right.controller.inc.Ki = params->pid[RUN_PID_RIGHT].ki;
+    pid_right.controller.inc.Kd = params->pid[RUN_PID_RIGHT].kd;
+    pid_gap.controller.pos.Kp = params->pid[RUN_PID_STEER].kp;
+    pid_gap.controller.pos.Ki = params->pid[RUN_PID_STEER].ki;
+    pid_gap.controller.pos.Kd = params->pid[RUN_PID_STEER].kd;
+    interrupt_global_enable(interrupt_state);
+    return 1;
+}
+
+// 一次临界区内复制观测量；格式化、绘屏和发送必须在恢复中断后执行。
+void run_get_monitor(run_monitor_t *monitor)
+{
+    uint32 interrupt_state = interrupt_global_disable();
+    monitor->status = run_status;
+    monitor->ready = run_ready;
+    monitor->start_pending = run_start_pending;
+    monitor->frame_sequence = run_vision.frame_sequence;
+    monitor->vision_age_ms = run_vision_ticks > 6553U ? 65530U : run_vision_ticks * 10U;
+    monitor->mid_valid = run_vision.mid_valid;
+    monitor->mid_error = run_vision.mid_error;
+    monitor->line_lost = run_vision.line_lost;
+    monitor->planned_speed = run_planned_speed;
+    monitor->ramped_speed = speed;
+    monitor->track_slope = run_vision.track_slope;
+    monitor->track_slope_valid = run_vision.track_slope_valid;
+    monitor->straight_long = run_vision.straight_long;
+    monitor->straight_confirmed = run_straight_confirmed;
+    monitor->cross = run_vision.cross;
+    monitor->ring_active = run_vision.ring_active;
+    monitor->curve_risk = run_curve_risk;
+    monitor->curve_speed_limit = run_curve_speed_limit;
+    monitor->pid_values[0] = pid_left.controller.inc.target;
+    monitor->pid_values[1] = pid_left.controller.inc.actual;
+    monitor->pid_values[2] = pid_left.controller.inc.output;
+    monitor->pid_values[3] = pid_right.controller.inc.target;
+    monitor->pid_values[4] = pid_right.controller.inc.actual;
+    monitor->pid_values[5] = pid_right.controller.inc.output;
+    monitor->pid_values[6] = pid_gap.controller.pos.target;
+    monitor->pid_values[7] = pid_gap.controller.pos.actual;
+    monitor->pid_values[8] = pid_gap.controller.pos.output;
+    monitor->fuzzy_error = monitor->fuzzy_delta = monitor->fuzzy_kp = monitor->fuzzy_kd = monitor->fuzzy_output = 0;
+    monitor->fuzzy_saturated = 0;
+#if RUN_STEER_FUZZY_ENABLE
+    monitor->fuzzy_error = fuzzy_gap.error;
+    monitor->fuzzy_delta = fuzzy_gap.delta_error;
+    monitor->fuzzy_kp = fuzzy_gap.active_kp;
+    monitor->fuzzy_kd = fuzzy_gap.active_kd;
+    monitor->fuzzy_output = fuzzy_gap.output;
+    monitor->fuzzy_saturated = fuzzy_gap.output >= fuzzy_gap.config.output_max
+                      || fuzzy_gap.output <= fuzzy_gap.config.output_min;
+#endif
     interrupt_global_enable(interrupt_state);
 }
 
 // 切换运行状态：清各类计数、停输出、复位三路 PID 和转向滤波；
-// 进入故障态时顺带丢弃按键事件，防止停车键被带进新状态。
+// 进入故障态时顺带清空启停请求，保持故障锁定。
 static void run_enter_state(run_state_enum state)
 {
     run_status.state = state;
@@ -276,7 +396,7 @@ static void run_enter_state(run_state_enum state)
     run_left_stall_ticks = 0;
     run_right_stall_ticks = 0;
     speed = 0;
-    run_stop_outputs();
+    hardware_stop();
     PID_Controller_Reset(&pid_left);
     PID_Controller_Reset(&pid_right);
     PID_Controller_Reset(&pid_gap);
@@ -298,7 +418,7 @@ static void run_enter_state(run_state_enum state)
 #endif
     run_speed_planner_frame_sequence = 0;
     if (RUN_STATE_FAULT == state)
-        run_debug_discard_keys();
+        run_toggle_request = 0;
 }
 
 // 记录故障位与现场数据（目标/实际/PWM），随后锁进故障状态。
@@ -319,13 +439,7 @@ static void run_enter_fault(uint8 fault)
 static void run_request_start(void)
 {
     run_enter_state(RUN_STATE_RUNNING);
-    filter_ring_init(&encoder_left_ring, encoder_left_buffer, ENCODER_FILTER_WINDOW);
-    filter_ring_init(&encoder_right_ring, encoder_right_buffer, ENCODER_FILTER_WINDOW);
-    filter_rc_state_reset(&encoder_left_filter);
-    filter_rc_state_reset(&encoder_right_filter);
-    hardware_reset_feedback();
-    raw_left = raw_right = 0;
-    encoder_left = encoder_right = 0;
+    run_reset_speed_feedback();
     run_vision_ticks = 0;
 }
 
@@ -342,7 +456,7 @@ static void run_update_direction(void)
     if (run_vision.mid_valid && !run_vision.line_lost)
         run_held_mid_error = run_vision.mid_error;
 
-    filtered_mid_error = filter_rc_low_pass(&steer_input_filter, (float)run_held_mid_error, 1);
+    filtered_mid_error = filter_rc_low_pass(&steer_input_filter, (float)run_held_mid_error, 0.4);
 #if RUN_STEER_FUZZY_ENABLE
     // 调参仍写原 pid_gap 的 Kp/Kd；下一次 10ms 周期使用新基准值，Ki 永久为零。
     pid_gap.controller.pos.Ki = 0.0;
@@ -363,7 +477,7 @@ static void run_update_direction(void)
 }
 
 // 返回最近一个 10ms 方向周期产生的方向输出，供 2ms 速度任务复用。
-double run_get_gap(void)
+static double run_get_gap(void)
 {
     if (RUN_STATE_RUNNING != run_status.state)
         return 0;
@@ -388,7 +502,7 @@ static uint8 run_stall_check(int16 target, int16 actual, int16 pwm, uint16 *tick
 
 // 一个控制周期的执行链：目标速度 ± 差速 -> 双轮 PID -> 堵转检查 -> 视觉停车 -> 输出 PWM。
 // 状态不是 RUNNING 时直接停输出返回；一旦判故障或收到停车标志就不再下发 PWM。
-static void run_direct(int16 target_speed, int16 gap, uint8 stop_requested)
+static void run_update_wheel_control(int16 target_speed, int16 gap, uint8 stop_requested)
 {
     int16 left_target = target_speed + gap;
     int16 right_target = target_speed - gap;
@@ -398,7 +512,7 @@ static void run_direct(int16 target_speed, int16 gap, uint8 stop_requested)
 
     if (RUN_STATE_RUNNING != run_status.state)
     {
-        run_stop_outputs();
+        hardware_stop();
         return;
     }
 
@@ -538,7 +652,7 @@ static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 u
 // 环岛和十字的补线会影响 slope，因此使用独立上限，并与其他限制取最小值。
 static int16 run_calc_element_speed_limit(const run_vision_struct *vision)
 {
-    int16 limit = RUN_SPEED_LIMIT;
+    int16 limit = RUN_PARAM_SPEED_MAX;
 
     if (vision->cross && RUN_SPEED_CROSS_LIMIT < limit)
         limit = RUN_SPEED_CROSS_LIMIT;
@@ -550,7 +664,7 @@ static int16 run_calc_element_speed_limit(const run_vision_struct *vision)
 // 丢线期间方向环仍保持最后一次有效误差，因此必须同时降低基础速度。
 static int16 run_calc_safety_speed_limit(const run_vision_struct *vision)
 {
-    return vision->line_lost ? RUN_SPEED_LINE_LOST_LIMIT : RUN_SPEED_LIMIT;
+    return vision->line_lost ? RUN_SPEED_LINE_LOST_LIMIT : RUN_PARAM_SPEED_MAX;
 }
 
 // 综合用户上限、弯道、特殊元素和安全限制；只产生基础目标速度，不操作执行器或 PID。
@@ -559,10 +673,10 @@ static int16 run_speed_planner(const run_vision_struct *vision)
     int16 planned = speed_setting;
     int32 slope = vision->track_slope;
 
-    if (planned > RUN_SPEED_LIMIT)
-        planned = RUN_SPEED_LIMIT;
-    if (planned < -RUN_SPEED_LIMIT)
-        planned = -RUN_SPEED_LIMIT;
+    if (planned > RUN_PARAM_SPEED_MAX)
+        planned = RUN_PARAM_SPEED_MAX;
+    if (planned < -RUN_PARAM_SPEED_MAX)
+        planned = -RUN_PARAM_SPEED_MAX;
 
     // 反向/停车命令保留原语义；当前前向赛道规划仅处理正速度。
     if (planned <= 0)
@@ -692,8 +806,12 @@ static void run_update_speed_ramp(int16 target_speed)
 // 通常连续参与两次方向 PID，但方向控制与执行器输出保持固定 10ms 周期。
 static void run_direction_tick_10ms(void)
 {
-    uint8 keys = run_debug_take_keys();
+    uint8 keys;
     run_vision_struct snapshot;
+    uint32 interrupt_state = interrupt_global_disable();
+    keys = run_toggle_request;
+    run_toggle_request = 0;
+    interrupt_global_enable(interrupt_state);
 
     // 视觉超时以 10ms 方向任务计数；只有真正的新帧才清零。
     if (run_vision_ticks < 65535U)
@@ -713,7 +831,7 @@ static void run_direction_tick_10ms(void)
     case RUN_STATE_IDLE:
         // 正常停车后 KEY1 重启：由 CPU1 复位元素/斑马线计数，等待新的完整帧。
         // 不直接改视觉全局变量；FAULT 不经过此流程，仍须重新上电。
-        if (keys & RUN_KEY_START_STOP)
+        if (keys)
         {
             if (run_start_pending)
                 run_start_pending = 0;
@@ -739,7 +857,7 @@ static void run_direction_tick_10ms(void)
                 else if (!run_vision.stop)
                     run_request_start();
             }
-            else if (run_start_wait_ticks >= RUN_VISION_TIMEOUT_TICKS)
+            if (run_start_pending && run_start_wait_ticks >= RUN_VISION_TIMEOUT_TICKS)
                 run_enter_fault(RUN_FAULT_VISION_TIMEOUT);
         }
         break;
@@ -752,7 +870,7 @@ static void run_direction_tick_10ms(void)
             break;
         }
         // 运行中再按一次启动键立即停车
-        if (keys & RUN_KEY_START_STOP)
+        if (keys)
         {
             run_enter_state(RUN_STATE_IDLE);
             break;
@@ -788,29 +906,32 @@ static void run_direction_tick_10ms(void)
     }
     // 非运行状态每个方向任务兜底停一次输出
     if (RUN_STATE_RUNNING != run_status.state)
-        run_stop_outputs();
+        hardware_stop();
 }
 
-// 2ms 速度任务：采样/滤波编码器并执行双轮速度 PID。方向 gap 只读最近一次新帧结果。
+// 左右轮复用同一滤波流程，但各自保存窗口和低通状态。
+// 保留原实现的顺序：滑动平均后先转为 int16，再进入低通，避免重构改变量化结果。
+static int16 run_filter_wheel_speed(int16 raw_speed, filter_ring_t *ring,
+                                    filter_rc_state_t *filter)
+{
+    int16 averaged_speed;
+    filter_ring_write(ring, raw_speed);
+    averaged_speed = (int16)filter_moving_average(ring);
+    return (int16)filter_rc_low_pass(filter, averaged_speed, 0.4);
+}
+
+// 2ms 速度任务：采样/滤波编码器并执行双轮速度 PID，读取最近一次方向任务的 gap。
 static void run_speed_tick_2ms(void)
 {
     hardware_feedback_t feedback;
 
-    hardware_update_2ms();
-    hardware_get_feedback(&feedback);
+    hardware_sample_2ms(&feedback);
 
     // raw_* 保留未滤波原始速度，encoder_* 为滤波后速度，速度 PID 只使用 encoder_*。
     raw_left = feedback.raw_left_speed;
-    encoder_left = raw_left;
-    filter_ring_write(&encoder_left_ring, encoder_left);
-    encoder_left = filter_moving_average(&encoder_left_ring);
-    encoder_left = filter_rc_low_pass(&encoder_left_filter, encoder_left, 0.4);
-
     raw_right = feedback.raw_right_speed;
-    encoder_right = raw_right;
-    filter_ring_write(&encoder_right_ring, encoder_right);
-    encoder_right = filter_moving_average(&encoder_right_ring);
-    encoder_right = filter_rc_low_pass(&encoder_right_filter, encoder_right, 0.4);
+    encoder_left = run_filter_wheel_speed(raw_left, &encoder_left_ring, &encoder_left_filter);
+    encoder_right = run_filter_wheel_speed(raw_right, &encoder_right_ring, &encoder_right_filter);
 
     if (RUN_STATE_RUNNING == run_status.state)
     {
@@ -819,11 +940,11 @@ static void run_speed_tick_2ms(void)
         if (run_vision.vision_stop)
             run_enter_fault(RUN_FAULT_VISION_STOP);
         else
-            run_direct(speed, (int16)run_get_gap(), run_vision.stop);
+            run_update_wheel_control(speed, (int16)run_get_gap(), run_vision.stop);
     }
     else
     {
-        run_stop_outputs();
+        hardware_stop();
     }
 }
 
@@ -845,15 +966,17 @@ static void run_control_tick_1ms(void)
     }
 }
 
-// CCU60 CH0 中断：1ms 基础调度，先开高优先级嵌套再清标志
+// ------------------ CPU0 定时器中断入口 ------------------
+// run 统一编排模块调用；按键先于控制执行，方向与速度同时到期时仍先方向后速度。
 IFX_INTERRUPT(cc60_pit_ch0_isr, 0, CCU6_0_CH0_ISR_PRIORITY)
 {
     interrupt_global_enable(0);
     pit_clear_flag(CCU60_CH0);
+    run_ui_tick_1ms();
     run_control_tick_1ms();
 }
 
-// CCU60 CH1 中断：10ms 调试周期，只做按键扫描与刷新、发送节拍
+// 只设置发送标志，绘屏、通信收发和参数解析均留在 run_while 调用链中。
 IFX_INTERRUPT(cc60_pit_ch1_isr, 0, CCU6_0_CH1_ISR_PRIORITY)
 {
     interrupt_global_enable(0);

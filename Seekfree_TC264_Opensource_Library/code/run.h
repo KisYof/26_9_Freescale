@@ -5,7 +5,7 @@
 
 // ------------------ 运行层接口 ------------------
 // 1ms 基础调度、2ms 双轮速度 PID、10ms 方向 PID、堵转和视觉超时保护。
-// 状态只允许在控制中断里改写，主循环通过 run_get_status() 只读。
+// 运行期间的状态只由控制中断改写，UI/通信通过快照和参数接口访问。
 
 // 1: 模糊 PD；0: 原位置式 PD (1.4 / 0 / 0.5)，重编译后切换。
 #ifndef RUN_STEER_FUZZY_ENABLE
@@ -29,9 +29,15 @@
 #endif
 
 // ------------------ 调试功能开关：1=开启，0=关闭 ------------------
+#ifndef RUN_WIFI_IMAGE_ENABLE
 #define RUN_WIFI_IMAGE_ENABLE     (1)   // WiFi 图像、边线、控制中线和前瞻标记传输
+#endif
+#ifndef RUN_WIFI_PID_DEBUG_ENABLE
 #define RUN_WIFI_PID_DEBUG_ENABLE (1)   // WiFi PID 参数调节与示波器传输
+#endif
+#ifndef RUN_UART_PID_DEBUG_ENABLE
 #define RUN_UART_PID_DEBUG_ENABLE (0)   // 串口 PID 文本调参与数据输出
+#endif
 
 // 运行状态，只由控制中断修改，主循环只读取。
 typedef enum
@@ -64,9 +70,71 @@ typedef struct
     int16 right_pwm;
 } run_status_struct;
 
-void run_get_status(run_status_struct *status); // 关中断拷贝状态，供主循环和调试层只读
-void run_init(void);                            // 初始化硬件、PID、滤波并启动 1ms/10ms 中断
-void run_while(void);                           // 主循环入口，只转发给调试层轮询
-double run_get_gap(void);                       // 取最近一帧的转向 PID 输出（左右轮差速），非运行状态返回 0
+// 参数业务边界统一由 run 定义，UI 和通信不再各自维护范围和组号。
+#define RUN_PARAM_SPEED_MAX (1000)
+#define RUN_PARAM_GAIN_MAX (100.0)
+
+typedef enum
+{
+    RUN_PID_LEFT = 0,
+    RUN_PID_RIGHT,
+    RUN_PID_STEER,
+    RUN_PID_GROUP_COUNT
+} run_pid_group_enum;
+
+// 控制层拥有参数；UI/通信只能取副本和提交整组更新，不能取得 PID 写指针。
+typedef struct
+{
+    double kp;
+    double ki;
+    double kd;
+} run_gains_t;
+
+typedef struct
+{
+    int16 speed;             // 目标速度设定值，单位 cm/s
+    run_gains_t pid[RUN_PID_GROUP_COUNT];       // 0=左轮，1=右轮，2=方向基准参数
+} run_params_t;
+
+// 主循环读取的一致副本；所有字段均由 run 层复制，不暴露控制对象指针。
+typedef struct
+{
+    run_status_struct status;
+    uint8 ready;             // 摄像头和双核初始化已完成
+    uint8 start_pending;     // 正在等待视觉复位和新帧
+    uint8 mid_valid;
+    uint8 line_lost;
+    uint32 frame_sequence;
+    uint16 vision_age_ms;     // 距最新一致视觉帧的时间，单位 ms，超出范围时饱和
+    int32 mid_error;
+    int16 planned_speed;
+    int16 ramped_speed;
+    int16 track_slope;
+    int16 curve_risk;
+    int16 curve_speed_limit;
+    uint8 track_slope_valid;
+    uint8 straight_long;
+    uint8 straight_confirmed;
+    uint8 cross;
+    uint8 ring_active;
+    double pid_values[9];     // 左轮/右轮/方向，每组三项：目标、实际、输出
+    double fuzzy_error;
+    double fuzzy_delta;
+    double fuzzy_kp;
+    double fuzzy_kd;
+    double fuzzy_output;
+    uint8 fuzzy_saturated;
+} run_monitor_t;
+
+// ------------------ main 只调用以下两个运行入口 ------------------
+void run_init(void);     // 摄像头初始化前调用：执行器、控制对象、按键和 IPS 屏幕
+void run_while(void);    // 双核同步后调用；首次启动调度/通信，此后轮询 UI 和 debug
+
+// ------------------ UI/通信使用的控制服务接口 ------------------
+void run_request_toggle(void);       // 只投递启停请求，状态由控制中断改写
+void run_get_monitor(run_monitor_t *monitor);
+void run_get_params(run_params_t *params);
+uint8 run_params_equal(const run_params_t *left, const run_params_t *right);
+uint8 run_apply_params(const run_params_t *params); // 仅 IDLE 且无启动请求时接受
 
 #endif
