@@ -17,10 +17,16 @@
 #endif
 
 // ------------------ WiFi 模块连接参数 ------------------
-#if (RUN_WIFI_IMAGE_ENABLE || RUN_WIFI_PID_DEBUG_ENABLE)
+#if (RUN_WIFI_IMAGE_ENABLE || RUN_WIFI_PID_DEBUG_ENABLE) && CHEN
 #define WIFI_IMAGE_SSID        "Redmi Note 12 Turbo"
 #define WIFI_IMAGE_PASSWORD    "nifcxsmvgr2fbp8"
 #define WIFI_IMAGE_TARGET_IP   "192.168.9.49"
+#define WIFI_IMAGE_TARGET_PORT "8086"
+#define WIFI_IMAGE_LOCAL_PORT  "6666"
+#elif (RUN_WIFI_IMAGE_ENABLE || RUN_WIFI_PID_DEBUG_ENABLE) && !CHEN
+#define WIFI_IMAGE_SSID        "KY"
+#define WIFI_IMAGE_PASSWORD    "asdfghjkl"
+#define WIFI_IMAGE_TARGET_IP   "10.176.40.16"
 #define WIFI_IMAGE_TARGET_PORT "8086"
 #define WIFI_IMAGE_LOCAL_PORT  "6666"
 #endif

@@ -38,6 +38,9 @@
 #ifndef RUN_UART_PID_DEBUG_ENABLE
 #define RUN_UART_PID_DEBUG_ENABLE (0)   // 串口 PID 文本调参与数据输出
 #endif
+#ifndef CHEN
+#define CHEN (1)
+#endif
 
 // 运行状态，只由控制中断修改，主循环只读取。
 typedef enum
