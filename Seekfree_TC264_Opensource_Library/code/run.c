@@ -21,8 +21,8 @@
 #define SPEED_MID (200)                // 调试层默认目标速度
 #define STEER_OUTPUT_MAP_SCALE (0.20)  // 转向输出换算成舵机角的缩放系数
 
-// Speed Planner 保守初值：Track_Slope_x1000 是弯道趋势而非严格几何曲率，以下参数均需实车标定。
-#define RUN_STRAIGHT_SLOPE_THRESHOLD (120) // 小于此值且 straight_long 有效，才累计直道确认
+// 原版回退参数（新版普通赛道使用下方标定表）：Track_Slope_x1000 是弯道趋势而非严格几何曲率，以下参数均需实车标定。
+#define RUN_STRAIGHT_SLOPE_THRESHOLD (120) // 新版 <=120；回退模式 <120 且 straight_long 有效
 #define RUN_CURVE_SLOPE_LOW (150)          // 轻弯起点 S1
 #define RUN_CURVE_SLOPE_MID (500)          // 中弯分段点 S2
 #define RUN_CURVE_SLOPE_HIGH (1000)        // 急弯分段点 S3
@@ -32,7 +32,16 @@
 #define RUN_SPEED_CROSS_LIMIT (160)        // 十字速度上限
 #define RUN_SPEED_RING_LIMIT (160)         // 环岛速度上限
 #define RUN_SPEED_LINE_LOST_LIMIT (120)    // 丢线时的安全速度上限
-#define RUN_STRAIGHT_CONFIRM_FRAMES (4U)   // 连续有效视觉帧数，约 80ms（按 50fps 估算）
+
+#if RUN_SPEED_PLANNER_ENABLE
+#define RUN_STRAIGHT_CONFIRM_FRAMES (6U)   // 至少六个有效新帧，不按调度次数累计
+#define RUN_STRAIGHT_REVOKE_SLOPE (200)
+#define RUN_STRAIGHT_MID_CONFIRM (10)
+#define RUN_STRAIGHT_MID_REVOKE (18)
+#define RUN_SPEED_UNCONFIRMED_LIMIT (185)
+#else
+#define RUN_STRAIGHT_CONFIRM_FRAMES (4U)   // 原版回退参数
+#endif
 
 // 原始速度与滤波后速度：只在 2ms 速度任务里更新
 volatile int16 raw_left = 0;
@@ -50,11 +59,13 @@ typedef struct
     int32 mid_error;       // 控制中线偏差，转向 PID 的输入
     uint8 mid_valid;       // 当前控制中线是否有效
     uint8 line_lost;       // 视觉丢线标志
-    uint8 stop;            // 视觉停车标志，第二次斑马线处理完成后置位
+    uint8 stop;            // 正常斑马线停车，回 IDLE
+    uint8 vision_stop;     // 持续丢线保护，锁入 FAULT
     int16 track_slope;     // 远近控制中线得到的赛道倾斜趋势（放大 1000 倍）
     uint8 track_slope_valid;
-    uint8 straight_long;   // 仅作为恢复高速的许可
+    uint8 straight_long;   // 原视觉标志，新版保留作辅助观测
     uint8 cross;
+    uint8 zebra;           // 斑马线阶段不能取得普通直道高速许可
     uint8 ring_active;     // 0=无环岛，非 0=环岛方向/活动状态
     uint8 ring_stage;
     uint8 ring_size;
@@ -74,13 +85,23 @@ static volatile int16 run_curve_speed_limit = 0;   // 弯道趋势/直道许可�
 static volatile int16 run_element_speed_limit = 0; // 十字/环岛产生的速度上限
 static volatile int16 run_safety_speed_limit = 0;  // 丢线产生的速度上限
 static uint8 run_straight_confirm_count = 0;
-static uint8 run_straight_confirmed = 0;
+static volatile uint8 run_straight_confirmed = 0;
+static volatile int16 run_curve_risk = 0; // 速度规划专用绝对倾斜风险，不进入方向环
+#if RUN_SPEED_PLANNER_ENABLE
+static uint32 run_curve_risk_x4 = 0;     // Q2 保留小数，下降权重 3/4
+#endif
 static uint32 run_speed_planner_frame_sequence = 0;
+static uint8 run_start_pending = 0;     // KEY1 请求后等待 CPU1 完成原有复位接口
+static uint16 run_start_wait_ticks = 0; // 独立复位等待计时，不被持续来帧清零
+static uint32 run_start_frame_sequence = 0;
 
 // 三路 PID：左右轮速度环为增量式，转向环为位置式
 static PID_Controller_t pid_left;
 static PID_Controller_t pid_right;
-static PID_Controller_t pid_gap;
+static PID_Controller_t pid_gap; // 模糊模式下保留基准参数和原调试通道，不执行普通 PID
+#if RUN_STEER_FUZZY_ENABLE
+static FuzzyPID_Controller_t fuzzy_gap;
+#endif
 
 // 编码器滤波：滑动平均窗口 + 一阶低通；steer_input_filter 用于中线偏差
 #define ENCODER_FILTER_WINDOW (20)
@@ -106,6 +127,70 @@ static int16 run_calc_safety_speed_limit(const run_vision_struct *vision);
 static int16 run_speed_planner(const run_vision_struct *vision);
 static void run_update_speed_ramp(int16 target_speed);
 
+#if RUN_STEER_FUZZY_ENABLE
+// 初始启发式标定，E/EC 保持现有误差单位和 10ms 离散差分，不除以秒。
+static void run_init_fuzzy_direction(void)
+{
+    static const double error_points[FUZZY_PID_LEVEL_COUNT] =
+        {-70.0, -45.0, -20.0, 0.0, 20.0, 45.0, 70.0};
+    static const double delta_points[FUZZY_PID_LEVEL_COUNT] =
+        {-16.0, -9.0, -4.0, 0.0, 4.0, 9.0, 16.0};
+    static const double kp_offsets[FUZZY_PID_LEVEL_COUNT] =
+        {-0.35, -0.25, -0.10, 0.0, 0.10, 0.22, 0.30};
+    static const double kd_offsets[FUZZY_PID_LEVEL_COUNT] =
+        {-0.18, -0.12, -0.07, 0.0, 0.07, 0.12, 0.18};
+    static const unsigned char kp_rules[FUZZY_PID_LEVEL_COUNT][FUZZY_PID_LEVEL_COUNT] =
+    {
+        {6, 5, 5, 5, 3, 3, 2},
+        {5, 5, 4, 4, 3, 3, 2},
+        {4, 4, 3, 2, 2, 2, 1},
+        {1, 1, 2, 2, 2, 1, 1},
+        {1, 2, 2, 2, 3, 4, 4},
+        {2, 3, 3, 4, 4, 5, 5},
+        {2, 3, 3, 5, 5, 5, 6}
+    };
+    static const unsigned char kd_rules[FUZZY_PID_LEVEL_COUNT][FUZZY_PID_LEVEL_COUNT] =
+    {
+        {2, 2, 2, 3, 4, 5, 5},
+        {2, 2, 3, 4, 5, 5, 6},
+        {2, 3, 3, 4, 5, 5, 6},
+        {2, 2, 2, 1, 2, 2, 2},
+        {6, 5, 5, 4, 3, 3, 2},
+        {6, 5, 5, 4, 3, 2, 2},
+        {5, 5, 4, 3, 2, 2, 2}
+    };
+    FuzzyPID_Config_t config;
+    unsigned char row;
+    unsigned char column;
+
+    FuzzyPID_Config_InitReference(&config);
+    for (row = 0; row < FUZZY_PID_LEVEL_COUNT; row++)
+    {
+        config.error_points[row] = error_points[row];
+        config.delta_error_points[row] = delta_points[row];
+        config.kp_offsets[row] = kp_offsets[row];
+        config.ki_offsets[row] = 0.0;
+        config.kd_offsets[row] = kd_offsets[row];
+        for (column = 0; column < FUZZY_PID_LEVEL_COUNT; column++)
+        {
+            config.kp_rules[row][column] = kp_rules[row][column];
+            config.ki_rules[row][column] = 3U;
+            config.kd_rules[row][column] = kd_rules[row][column];
+        }
+    }
+    config.kp_min = 0.85;
+    config.kp_max = 1.65;
+    config.ki_min = config.ki_max = 0.0;
+    config.kd_min = 0.12;
+    config.kd_max = 0.60;
+    config.delta_error_limit = 16.0;
+    config.integral_min = config.integral_max = 0.0;
+    config.output_min = -90.0;
+    config.output_max = 90.0;
+    FuzzyPID_Init(&fuzzy_gap, &config, 1.25, 0.0, 0.36);
+}
+#endif
+
 // 上电调用一次：初始化硬件、三路 PID、编码器滤波，注册调试引用，
 // 进入空闲态后再启动 1ms 基础调度中断与 10ms 调试中断。
 void run_init(void)
@@ -117,7 +202,12 @@ void run_init(void)
     // 保持当前左右轮速度 PID 与方向 PID 参数不变，本次 Speed Planner 只调整目标速度。
     PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3500, -3500, 0, 0);
     PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3500, -3500, 0, 0);
+#if RUN_STEER_FUZZY_ENABLE
+    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.25, 0.0, 0.36, 90, -90, 0, 0);
+    run_init_fuzzy_direction();
+#else
     PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.4, 0.0, 0.5, 90, -90, 0, 0);
+#endif
 
     // 滑动平均窗口与三个一阶滤波器全部清零
     filter_ring_init(&encoder_left_ring, encoder_left_buffer, ENCODER_FILTER_WINDOW);
@@ -131,9 +221,15 @@ void run_init(void)
     debug_control.left_pid = &pid_left;
     debug_control.right_pid = &pid_right;
     debug_control.gap_pid = &pid_gap;
+#if RUN_STEER_FUZZY_ENABLE
+    debug_control.fuzzy_gap = &fuzzy_gap;
+#endif
     debug_control.planned_speed = &run_planned_speed;
     debug_control.ramped_speed = &speed;
     debug_control.track_slope = &run_vision.track_slope;
+    debug_control.curve_risk = &run_curve_risk;
+    debug_control.curve_speed_limit = &run_curve_speed_limit;
+    debug_control.straight_confirmed = &run_straight_confirmed;
     debug_control.track_slope_valid = &run_vision.track_slope_valid;
     debug_control.straight_long = &run_vision.straight_long;
     debug_control.cross = &run_vision.cross;
@@ -175,6 +271,7 @@ void run_get_status(run_status_struct *status)
 static void run_enter_state(run_state_enum state)
 {
     run_status.state = state;
+    run_start_pending = 0;
     run_state_ticks = 0;
     run_left_stall_ticks = 0;
     run_right_stall_ticks = 0;
@@ -183,6 +280,9 @@ static void run_enter_state(run_state_enum state)
     PID_Controller_Reset(&pid_left);
     PID_Controller_Reset(&pid_right);
     PID_Controller_Reset(&pid_gap);
+#if RUN_STEER_FUZZY_ENABLE
+    FuzzyPID_Reset(&fuzzy_gap);
+#endif
     filter_rc_state_reset(&steer_input_filter);
     run_held_mid_error = 0;
     run_direction_gap = 0;
@@ -192,6 +292,10 @@ static void run_enter_state(run_state_enum state)
     run_safety_speed_limit = 0;
     run_straight_confirm_count = 0;
     run_straight_confirmed = 0;
+    run_curve_risk = 0;
+#if RUN_SPEED_PLANNER_ENABLE
+    run_curve_risk_x4 = 0;
+#endif
     run_speed_planner_frame_sequence = 0;
     if (RUN_STATE_FAULT == state)
         run_debug_discard_keys();
@@ -239,7 +343,23 @@ static void run_update_direction(void)
         run_held_mid_error = run_vision.mid_error;
 
     filtered_mid_error = filter_rc_low_pass(&steer_input_filter, (float)run_held_mid_error, 1);
+#if RUN_STEER_FUZZY_ENABLE
+    // 调参仍写原 pid_gap 的 Kp/Kd；下一次 10ms 周期使用新基准值，Ki 永久为零。
+    pid_gap.controller.pos.Ki = 0.0;
+    FuzzyPID_SetBaseGains(&fuzzy_gap, pid_gap.controller.pos.Kp, 0.0,
+                         pid_gap.controller.pos.Kd);
+    // E = 0 - filtered_mid_error；重复视觉误差时 EC 自动归零。
+    run_direction_gap = FuzzyPID_Calc(&fuzzy_gap, 0, (double)filtered_mid_error);
+    // 同步原 target / actual / output 调试通道，保持上位机和串口数据顺序。
+    pid_gap.controller.pos.target = fuzzy_gap.target;
+    pid_gap.controller.pos.actual = fuzzy_gap.actual;
+    pid_gap.controller.pos.output = fuzzy_gap.output;
+    pid_gap.controller.pos.Error1 = pid_gap.controller.pos.Error0;
+    pid_gap.controller.pos.Error0 = fuzzy_gap.error;
+    pid_gap.controller.pos.ErrorInt = 0.0;
+#else
     run_direction_gap = PID_Controller_Calc(&pid_gap, 0, (double)filtered_mid_error);
+#endif
 }
 
 // 返回最近一个 10ms 方向周期产生的方向输出，供 2ms 速度任务复用。
@@ -321,10 +441,12 @@ static uint8 run_read_vision(run_vision_struct *snapshot)
     copy.mid_valid = ControlMidValid;
     copy.line_lost = LineLostFlag;
     copy.stop = ImageFlag.Stop;
+    copy.vision_stop = VisionStopFlag;
     copy.track_slope = Track_Slope_x1000;
     copy.track_slope_valid = Track_SlopeValid;
     copy.straight_long = ImageFlag.straight_long;
     copy.cross = ImageFlag.Cross_Flag;
+    copy.zebra = ImageFlag.Zebra_Flag;
     copy.ring_active = ImageFlag.image_element_rings;
     copy.ring_stage = ImageFlag.image_element_rings_flag;
     copy.ring_size = ImageFlag.ring_big_small;
@@ -347,10 +469,39 @@ static int16 run_speed_limit_lerp(int16 value, int16 input_low, int16 input_high
     return (int16)(output_low + numerator / (input_high - input_low));
 }
 
-// 普通赛道限速：有效 slope 使用连续分段映射；无效 slope 绝不按直道放行。
-// straight_long 只负责允许恢复用户最高速度，未确认时最高限制在轻弯速度。
+// 普通赛道：风险滤波后连续单调映射，未确认直道限制在 185。
+// straight_long 保留作观测参考；普通直道由倾斜和中线偏差连续六帧确认。
 static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 user_limit)
 {
+#if RUN_SPEED_PLANNER_ENABLE
+    // 初始提速标定点，不代表物理安全极限；所有插值乘积使用 int32。
+    static const int16 slope_points[] = {0, 120, 150, 300, 500, 800, 1100, 1400};
+    static const int16 speed_points[] = {200, 200, 195, 185, 175, 170, 165, 160};
+    int16 limit = RUN_SPEED_CURVE_MIN;
+    int16 slope = run_curve_risk;
+    uint8 point;
+
+    // 特殊元素/失效状态不使用新的普通赛道映射；冻结 risk 后仍采用原保守上限。
+    if (!vision->track_slope_valid || !vision->mid_valid || vision->line_lost
+        || vision->cross || vision->ring_active || vision->zebra)
+        return (user_limit < RUN_SPEED_UNKNOWN_LIMIT) ? user_limit : RUN_SPEED_UNKNOWN_LIMIT;
+
+    for (point = 1; point < (uint8)(sizeof(slope_points) / sizeof(slope_points[0])); point++)
+    {
+        if (slope <= slope_points[point])
+        {
+            limit = run_speed_limit_lerp(slope, slope_points[point - 1], slope_points[point],
+                                         speed_points[point - 1], speed_points[point]);
+            break;
+        }
+    }
+    // 许可只在低风险区放行用户上限；其他区域继续按连续映射限速。
+    if (run_straight_confirmed && slope <= RUN_STRAIGHT_SLOPE_THRESHOLD)
+        limit = user_limit;
+    if (!run_straight_confirmed && limit > RUN_SPEED_UNCONFIRMED_LIMIT)
+        limit = RUN_SPEED_UNCONFIRMED_LIMIT;
+    return (user_limit < limit) ? user_limit : limit;
+#else
     int16 mild_limit = (user_limit < RUN_SPEED_CURVE_MILD) ? user_limit : RUN_SPEED_CURVE_MILD;
     int16 minimum_limit = (user_limit < RUN_SPEED_CURVE_MIN) ? user_limit : RUN_SPEED_CURVE_MIN;
     int32 slope = vision->track_slope;
@@ -381,6 +532,7 @@ static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 u
                                     mild_limit, minimum_limit);
     }
     return minimum_limit;
+#endif
 }
 
 // 环岛和十字的补线会影响 slope，因此使用独立上限，并与其他限制取最小值。
@@ -415,12 +567,66 @@ static int16 run_speed_planner(const run_vision_struct *vision)
     // 反向/停车命令保留原语义；当前前向赛道规划仅处理正速度。
     if (planned <= 0)
     {
+#if RUN_SPEED_PLANNER_ENABLE
+        run_straight_confirm_count = 0;
+        run_straight_confirmed = 0;
+        run_speed_planner_frame_sequence = vision->frame_sequence;
+#endif
         run_curve_speed_limit = planned;
         run_element_speed_limit = planned;
         run_safety_speed_limit = planned;
         return planned;
     }
 
+#if RUN_SPEED_PLANNER_ENABLE
+    // 重复同一视觉帧不更新 risk，也不累计直道帧；任何危险标志立即撤销许可。
+    if (slope < 0)
+        slope = -slope;
+    if (slope > 32767)
+        slope = 32767;
+    if (!vision->track_slope_valid || !vision->mid_valid || vision->line_lost
+        || vision->cross || vision->ring_active || vision->zebra
+        || vision->stop || vision->vision_stop || run_status.fault
+        || RUN_STATE_RUNNING != run_status.state
+        || run_vision_ticks >= RUN_VISION_TIMEOUT_TICKS
+        || slope >= RUN_STRAIGHT_REVOKE_SLOPE
+        || vision->mid_error > RUN_STRAIGHT_MID_REVOKE
+        || vision->mid_error < -RUN_STRAIGHT_MID_REVOKE)
+    {
+        run_straight_confirm_count = 0;
+        run_straight_confirmed = 0;
+    }
+    if (vision->frame_sequence != run_speed_planner_frame_sequence)
+    {
+        run_speed_planner_frame_sequence = vision->frame_sequence;
+        if (vision->track_slope_valid && vision->mid_valid && !vision->line_lost
+            && !vision->cross && !vision->ring_active && !vision->zebra
+            && !vision->stop && !vision->vision_stop && !run_status.fault
+            && RUN_STATE_RUNNING == run_status.state
+            && run_vision_ticks < RUN_VISION_TIMEOUT_TICKS)
+        {
+            uint32 sample_x4 = (uint32)slope * 4U;
+            if (sample_x4 >= run_curve_risk_x4)
+                run_curve_risk_x4 = sample_x4;
+            else
+                run_curve_risk_x4 = (3U * run_curve_risk_x4 + sample_x4 + 3U) / 4U;
+            // 向上量化避免低估风险；误差不足一个 slope 单位。
+            run_curve_risk = (int16)((run_curve_risk_x4 + 3U) / 4U);
+            if (slope <= RUN_STRAIGHT_SLOPE_THRESHOLD
+                && vision->mid_error <= RUN_STRAIGHT_MID_CONFIRM
+                && vision->mid_error >= -RUN_STRAIGHT_MID_CONFIRM)
+            {
+                if (run_straight_confirm_count < RUN_STRAIGHT_CONFIRM_FRAMES)
+                    run_straight_confirm_count++;
+                if (run_straight_confirm_count >= RUN_STRAIGHT_CONFIRM_FRAMES)
+                    run_straight_confirmed = 1;
+            }
+            else
+                run_straight_confirm_count = 0;
+        }
+        // 失效/元素期间不把 risk 清零，不用该帧的低 slope 提前恢复高速。
+    }
+#else
     // 直道确认按“新视觉帧”计数，而不是按 10ms 调度次数重复累计同一帧。
     if (vision->frame_sequence != run_speed_planner_frame_sequence)
     {
@@ -449,6 +655,8 @@ static int16 run_speed_planner(const run_vision_struct *vision)
             }
         }
     }
+
+#endif
 
     run_curve_speed_limit = run_calc_curve_speed_limit(vision, planned);
     run_element_speed_limit = run_calc_element_speed_limit(vision);
@@ -503,12 +711,46 @@ static void run_direction_tick_10ms(void)
     switch (run_status.state)
     {
     case RUN_STATE_IDLE:
-        // 空闲态按启动键进入运行
+        // 正常停车后 KEY1 重启：由 CPU1 复位元素/斑马线计数，等待新的完整帧。
+        // 不直接改视觉全局变量；FAULT 不经过此流程，仍须重新上电。
         if (keys & RUN_KEY_START_STOP)
-            run_request_start();
+        {
+            if (run_start_pending)
+                run_start_pending = 0;
+            else
+            {
+                run_start_frame_sequence = run_vision.frame_sequence;
+                Camera_RequestRuntimeReset();
+                run_start_pending = 1;
+                run_start_wait_ticks = 0;
+                run_vision_ticks = 0;
+            }
+        }
+        if (run_start_pending)
+        {
+            if (run_start_wait_ticks < RUN_VISION_TIMEOUT_TICKS)
+                run_start_wait_ticks++;
+            if (!Camera_RuntimeResetPending()
+                && run_vision.frame_sequence != run_start_frame_sequence
+                && run_vision.frame_sequence == VisionFrameSequence)
+            {
+                if (run_vision.vision_stop)
+                    run_enter_fault(RUN_FAULT_VISION_STOP);
+                else if (!run_vision.stop)
+                    run_request_start();
+            }
+            else if (run_start_wait_ticks >= RUN_VISION_TIMEOUT_TICKS)
+                run_enter_fault(RUN_FAULT_VISION_TIMEOUT);
+        }
         break;
 
     case RUN_STATE_RUNNING:
+        // 独立安全修复：持续丢线停止优先于普通停车，不允许按键清除故障锁。
+        if (run_vision.vision_stop)
+        {
+            run_enter_fault(RUN_FAULT_VISION_STOP);
+            break;
+        }
         // 运行中再按一次启动键立即停车
         if (keys & RUN_KEY_START_STOP)
         {
@@ -574,7 +816,10 @@ static void run_speed_tick_2ms(void)
     {
         if (run_state_ticks < 65535U)
             run_state_ticks++;
-        run_direct(speed, (int16)run_get_gap(), run_vision.stop);
+        if (run_vision.vision_stop)
+            run_enter_fault(RUN_FAULT_VISION_STOP);
+        else
+            run_direct(speed, (int16)run_get_gap(), run_vision.stop);
     }
     else
     {
