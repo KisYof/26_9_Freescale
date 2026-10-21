@@ -3055,6 +3055,58 @@ void ControlMid_Update(void)
         ControlProspectRow = LCDH - 1;
     }
 
+//     普通赛道动态前瞻：
+//    当前控制行和更远处的中线差值较大时，
+//    自动把控制行向远处移动。
+    static uint8 control_row_dynamic = 0;
+    static uint8 control_row_type_last = 0xFF;
+
+uint8 target_row = ControlProspectRow;
+
+if (ControlProspectType == VP_NORMAL &&
+    ControlProspectRow > 8)
+{
+    uint8 far_row = ControlProspectRow - 8;
+    int near_mid = ControlMidLine[ControlProspectRow];
+    int far_mid  = ControlMidLine[far_row];
+
+    if (near_mid >= 0 && far_mid >= 0)
+    {
+        int diff = far_mid - near_mid;
+
+        if (diff > 6 || diff < -6)
+        {
+            target_row = far_row;
+        }
+    }
+}
+
+// 控制行每帧最多移动1行，避免黄色线突然跳动 
+if (ControlProspectType != control_row_type_last)
+{
+    control_row_dynamic = target_row;
+    control_row_type_last = ControlProspectType;
+}
+else
+{
+    if (target_row < control_row_dynamic)
+    {
+        control_row_dynamic--;
+    }
+    else if (target_row > control_row_dynamic)
+    {
+        control_row_dynamic++;
+    }
+}
+
+/* 不要越过扫线截止行 */
+if (control_row_dynamic <= ImageStatus.OFFLine + 2)
+{
+    control_row_dynamic = ImageStatus.OFFLine + 3;
+}
+
+ControlProspectRow = control_row_dynamic;
+
     /* 3. 先取控制行附近三行 */
     start = (int)ControlProspectRow - 1;
     end   = (int)ControlProspectRow + 1;
