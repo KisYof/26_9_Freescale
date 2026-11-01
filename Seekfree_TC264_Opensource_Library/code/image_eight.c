@@ -1,5 +1,5 @@
 /*
- * @file image_eight.c
+ *image_eight.c
  *mt9v03x_image
 → 复制灰度图
 → OTSU 二值化
@@ -81,7 +81,11 @@ static void Eight_CrossFill(
     const uint16 (*points_r)[2]
 );
 
+static int16 eight_left_crop[LCDH];
+static int16 eight_right_crop[LCDH];
 
+static uint8 eight_left_valid_crop[LCDH];
+static uint8 eight_right_valid_crop[LCDH];
 
 /*
 函数名称：Eight_Abs(int value)
@@ -896,24 +900,61 @@ static void Eight_CrossFill(
 }
 void EightNeighbor_ToLegacy(void)
 {
-    for (int y_old = 0; y_old < LCDH; y_old++)
+    int y_old;
+
+    for (y_old = 0; y_old < LCDH; y_old++)
     {
         int y_raw = y_old + Cut_high_top;
-        int x_raw = eight_frame.center[y_raw];
-        int x_old = x_raw - (Cut_width_half - 2);
+        int left_raw;
+        int right_raw;
+        int center_raw;
+
+        int left_old;
+        int right_old;
+        int center_old;
+
+        eight_center_crop[y_old] = -1;
+        eight_center_valid[y_old] = 0;
+
+        eight_left_crop[y_old] = -1;
+        eight_right_crop[y_old] = -1;
+
+        eight_left_valid_crop[y_old] = 0;
+        eight_right_valid_crop[y_old] = 0;
 
         if (!eight_frame.valid ||
             y_raw < eight_frame.highest ||
-            x_raw <= 0 ||
-            x_old < 0 ||
-            x_old >= LCDW)
+            y_raw >= EIGHT_IMAGE_H)
         {
-            eight_center_crop[y_old] = -1;
-            eight_center_valid[y_old] = 0;
+            continue;
         }
-        else
+
+        left_raw   = eight_frame.left[y_raw];
+        right_raw  = eight_frame.right[y_raw];
+        center_raw = eight_frame.center[y_raw];
+
+        left_old   = left_raw   - (Cut_width_half - 2);
+        right_old  = right_raw  - (Cut_width_half - 2);
+        center_old = center_raw - (Cut_width_half - 2);
+
+        /* 左边线有效 */
+        if (left_old >= 0 && left_old < LCDW)
         {
-            eight_center_crop[y_old] = x_old;
+            eight_left_crop[y_old] = (int16)left_old;
+            eight_left_valid_crop[y_old] = 1;
+        }
+
+        /* 右边线有效 */
+        if (right_old >= 0 && right_old < LCDW)
+        {
+            eight_right_crop[y_old] = (int16)right_old;
+            eight_right_valid_crop[y_old] = 1;
+        }
+
+        /* 中线有效 */
+        if (center_old >= 0 && center_old < LCDW)
+        {
+            eight_center_crop[y_old] = (int16)center_old;
             eight_center_valid[y_old] = 1;
         }
     }
@@ -1106,6 +1147,157 @@ void EightNeighbor_PublishEdgesToImageDeal(void)
             ImageDeal[y_old].Wide =
                 ImageDeal[y_old].RightBorder -
                 ImageDeal[y_old].LeftBorder;
+        }
+    }
+}
+//圆环中线处理函数
+void EightNeighbor_ApplyRingCenter(void)
+{
+    int y;
+    int center;
+    int left_ok;
+    int right_ok;
+    int wide;
+    int half_width;
+
+    if (ImageFlag.image_element_rings == 0)
+    {
+        return;
+    }
+
+    for (y = 0; y < LCDH; y++)
+    {
+        center = -1;
+        left_ok = eight_left_valid_crop[y];
+        right_ok = eight_right_valid_crop[y];
+
+        if (left_ok && right_ok)
+        {
+            wide = eight_right_crop[y] - eight_left_crop[y];
+        }
+        else
+        {
+            wide = 0;
+        }
+
+        if (ImageFlag.image_element_rings == 1)
+        {
+            /* 左圆环 */
+            if (ImageFlag.image_element_rings_flag >= 5 &&
+                ImageFlag.image_element_rings_flag <= 8)
+            {
+                /* 进入/环内：使用左侧内线 */
+                if (left_ok)
+                {
+                    if (ImageFlag.ring_big_small == 2)
+                    {
+                        half_width = Half_Ring_Wide[y];
+                    }
+                    else
+                    {
+                        half_width = Half_Ring_Wide_small[y];
+                    }
+
+                    center = eight_left_crop[y] +
+                             half_width -
+                             Small_Rings_HalfWide_Offset;
+
+                    /* 准备出环，额外修正 */
+                    if (ImageFlag.image_element_rings_flag == 8 &&
+                        ImageFlag.ring_big_small != 2)
+                    {
+                        center += 10;
+                    }
+                }
+            }
+            else
+            {
+                /* 入口/出口：优先使用左右中点 */
+                if (left_ok && right_ok &&
+                    wide >= 20 &&
+                    wide <= 140)
+                {
+                    center = (eight_left_crop[y] +
+                              eight_right_crop[y]) / 2;
+                }
+                else if (right_ok)
+                {
+                    /* 只有右侧外线 */
+                    center = eight_right_crop[y] -
+                             Half_Road_Wide[y];
+                }
+                else if (left_ok)
+                {
+                    /* 只有左侧线 */
+                    center = eight_left_crop[y] +
+                             Half_Road_Wide[y];
+                }
+            }
+        }
+        else if (ImageFlag.image_element_rings == 2)
+        {
+            /* 右圆环 */
+            if (ImageFlag.image_element_rings_flag >= 5 &&
+                ImageFlag.image_element_rings_flag <= 8)
+            {
+                /* 进入/环内：使用右侧内线 */
+                if (right_ok)
+                {
+                    if (ImageFlag.ring_big_small == 2)
+                    {
+                        half_width = Half_Ring_Wide[y];
+                    }
+                    else
+                    {
+                        half_width = Half_Ring_Wide_small[y];
+                    }
+
+                    center = eight_right_crop[y] -
+                             half_width +
+                             Small_Rings_HalfWide_Offset;
+
+                    /* 准备出环，额外修正 */
+                    if (ImageFlag.image_element_rings_flag == 8 &&
+                        ImageFlag.ring_big_small != 2)
+                    {
+                        center -= 10;
+                    }
+                }
+            }
+            else
+            {
+                /* 入口/出口：优先使用左右中点 */
+                if (left_ok && right_ok &&
+                    wide >= 20 &&
+                    wide <= 140)
+                {
+                    center = (eight_left_crop[y] +
+                              eight_right_crop[y]) / 2;
+                }
+                else if (left_ok)
+                {
+                    /* 只有左侧外线 */
+                    center = eight_left_crop[y] +
+                             Half_Road_Wide[y];
+                }
+                else if (right_ok)
+                {
+                    /* 只有右侧线 */
+                    center = eight_right_crop[y] -
+                             Half_Road_Wide[y];
+                }
+            }
+        }
+
+        if (center >= 0 && center < LCDW)
+        {
+            eight_center_crop[y] = center;
+            eight_center_valid[y] = 1;
+        }
+        else
+        {
+            eight_center_crop[y] = -1;
+            eight_center_valid[y] = 0;
         }
     }
 }

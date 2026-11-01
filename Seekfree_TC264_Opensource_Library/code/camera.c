@@ -3060,6 +3060,11 @@ uint8 Image_Process(void)
           //ÔªËØ´¦Àí
           Element_Handle();         
 //image_processing = 0;
+
+#if EIGHT_NEIGHBOR_ENABLE
+EightNeighbor_ApplyRingCenter();
+#endif
+
           
           #if EIGHT_CONTROL_ENABLE
 

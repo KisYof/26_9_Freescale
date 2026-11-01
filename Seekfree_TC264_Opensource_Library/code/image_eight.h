@@ -44,5 +44,6 @@ void EightNeighbor_Process(const uint8 image[EIGHT_IMAGE_H][EIGHT_IMAGE_W]);
 void EightNeighbor_ToLegacy(void);
 void EightNeighbor_Compare(void);
 void EightNeighbor_PublishEdgesToImageDeal(void);
+void EightNeighbor_ApplyRingCenter(void);
 
 #endif

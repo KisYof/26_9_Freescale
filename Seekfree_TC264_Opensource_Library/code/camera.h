@@ -168,4 +168,8 @@ void Data_init(void);
 extern uint8 get_Threshold(uint8* image[][LCDW],uint16 col, uint16 row);
 extern uint32 break_road(uint8 line_start);
 
+extern uint8 Half_Road_Wide[LCDH];
+extern uint8 Half_Ring_Wide[LCDH];
+extern uint8 Half_Ring_Wide_small[LCDH];
+extern int Small_Rings_HalfWide_Offset;
 #endif /* CODE_CAMERA_H_ */
