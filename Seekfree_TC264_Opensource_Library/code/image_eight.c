@@ -588,17 +588,19 @@ void Eight_GetLeft(uint16 total_L)
             continue;
         }
 
+        /* 过滤图像封边框 */
         if (x <= EIGHT_EDGE_MARGIN ||
-    x >= EIGHT_IMAGE_W - 1 - EIGHT_EDGE_MARGIN)
-{
-    continue;
-}
+            x >= EIGHT_IMAGE_W - 1 - EIGHT_EDGE_MARGIN)
+        {
+            continue;
+        }
 
-if (!eight_left_raw_valid[y] || x < eight_l_border[y])
-{
-    eight_l_border[y] = x;
-    eight_left_raw_valid[y] = 1;
-}
+        /* 每行只取第一次出现的点 */
+        if (!eight_left_raw_valid[y])
+        {
+            eight_l_border[y] = x;
+            eight_left_raw_valid[y] = 1;
+        }
     }
 }
 /*
@@ -633,17 +635,19 @@ void Eight_GetRight(uint16 total_R)
             continue;
         }
 
+        /* 过滤图像封边框 */
         if (x <= EIGHT_EDGE_MARGIN ||
-    x >= EIGHT_IMAGE_W - 1 - EIGHT_EDGE_MARGIN)
-{
-    continue;
-}
+            x >= EIGHT_IMAGE_W - 1 - EIGHT_EDGE_MARGIN)
+        {
+            continue;
+        }
 
-if (!eight_right_raw_valid[y] || x > eight_r_border[y])
-{
-    eight_r_border[y] = x;
-    eight_right_raw_valid[y] = 1;
-}
+        /* 参考工程思想：每行只取第一次出现的点 */
+        if (!eight_right_raw_valid[y])
+        {
+            eight_r_border[y] = x;
+            eight_right_raw_valid[y] = 1;
+        }
     }
 }
 /** 
@@ -1132,11 +1136,11 @@ void EightNeighbor_PublishEdgesToImageDeal(void)
     int left_old;
     int right_old;
 
-    /* 八邻域本帧无效，保留 Get_AllLine() 的边线用于调试 */
-    if (!eight_frame.valid)
-    {
-        return;
-    }
+    // /* 八邻域本帧无效，保留 Get_AllLine() 的边线用于调试 */
+    // if (!eight_frame.valid)
+    // {
+    //     return;
+    // }
 
     for (y_old = 0; y_old < LCDH; y_old++)
     {
