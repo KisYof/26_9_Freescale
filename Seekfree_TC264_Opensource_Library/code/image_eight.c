@@ -87,6 +87,8 @@ static int16 eight_right_crop[LCDH];
 static uint8 eight_left_valid_crop[LCDH];
 static uint8 eight_right_valid_crop[LCDH];
 
+static uint8 eight_left_raw_valid[EIGHT_IMAGE_H];
+static uint8 eight_right_raw_valid[EIGHT_IMAGE_H];
 /*
 函数名称：Eight_Abs(int value)
 功能说明：求绝对值
@@ -563,32 +565,41 @@ example： Eight_GetLeft(eight_points_l_num);
 // uint8 l_border[EIGHT_IMAGE_H;//左线数组
 // uint8 r_border[EIGHT_IMAGE_H];//右线数组
 // uint8 center_line[EIGHT_IMAGE_H];//中线数组
+#define EIGHT_EDGE_MARGIN 3
 void Eight_GetLeft(uint16 total_L)
 {
-	uint8 i = 0;
-	uint16 j = 0;
-	uint8 h = 0;
-	//初始化
-	for (i = 0;i<EIGHT_IMAGE_H;i++)
-	{
-		eight_l_border[i] = EIGHT_BORDER_MIN;
-	}
-	h = EIGHT_IMAGE_H - 2;
-	//左边
-	for (j = 0; j < total_L; j++)
-	{
-		//printf("%d\n", j);
-		if (eight_points_l[j][1] == h)
-		{
-			eight_l_border[h] = eight_points_l[j][0]+1;
-		}
-		else continue; //每行只取一个点，没到下一行就不记录
-		h--;
-		if (h == 0) 
-		{
-			break;//到最后一行退出
-		}
-	}
+    uint16 j;
+    uint8 y;
+    uint8 x;
+
+    for (y = 0; y < EIGHT_IMAGE_H; y++)
+    {
+        eight_l_border[y] = EIGHT_BORDER_MIN;
+        eight_left_raw_valid[y] = 0;
+    }
+
+    for (j = 0; j < total_L; j++)
+    {
+        y = (uint8)eight_points_l[j][1];
+        x = (uint8)(eight_points_l[j][0] + 1);
+
+        if (y >= EIGHT_IMAGE_H || x >= EIGHT_IMAGE_W)
+        {
+            continue;
+        }
+
+        if (x <= EIGHT_EDGE_MARGIN ||
+    x >= EIGHT_IMAGE_W - 1 - EIGHT_EDGE_MARGIN)
+{
+    continue;
+}
+
+if (!eight_left_raw_valid[y] || x < eight_l_border[y])
+{
+    eight_l_border[y] = x;
+    eight_left_raw_valid[y] = 1;
+}
+    }
 }
 /*
 函数名称：void Eight_GetRight(uint16 total_R)
@@ -602,25 +613,38 @@ example：Eight_GetRight(eight_points_r_num);
  */
 void Eight_GetRight(uint16 total_R)
 {
-	uint8 i = 0;
-	uint16 j = 0;
-	uint8 h = 0;
-	for (i = 0; i < EIGHT_IMAGE_H; i++)
-	{
-		eight_r_border[i] = EIGHT_BORDER_MAX;//右边线初始化放到最右边，左边线放到最左边，这样八邻域闭合区域外的中线就会在中间，不会干扰得到的数据
-	}
-	h = EIGHT_IMAGE_H - 2;
-	//右边
-	for (j = 0; j < total_R; j++)
-	{
-		if (eight_points_r[j][1] == h)
-		{
-			eight_r_border[h] = eight_points_r[j][0] - 1;
-		}
-		else continue;//每行只取一个点，没到下一行就不记录
-		h--;
-		if (h == 0)break;//到最后一行退出
-	}
+    uint16 j;
+    uint8 y;
+    uint8 x;
+
+    for (y = 0; y < EIGHT_IMAGE_H; y++)
+    {
+        eight_r_border[y] = EIGHT_BORDER_MAX;
+        eight_right_raw_valid[y] = 0;
+    }
+
+    for (j = 0; j < total_R; j++)
+    {
+        y = (uint8)eight_points_r[j][1];
+        x = (uint8)(eight_points_r[j][0] - 1);
+
+        if (y >= EIGHT_IMAGE_H || x >= EIGHT_IMAGE_W)
+        {
+            continue;
+        }
+
+        if (x <= EIGHT_EDGE_MARGIN ||
+    x >= EIGHT_IMAGE_W - 1 - EIGHT_EDGE_MARGIN)
+{
+    continue;
+}
+
+if (!eight_right_raw_valid[y] || x > eight_r_border[y])
+{
+    eight_r_border[y] = x;
+    eight_right_raw_valid[y] = 1;
+}
+    }
 }
 /** 
 * @brief 最小二乘法斜率函数
@@ -938,26 +962,33 @@ void EightNeighbor_ToLegacy(void)
         center_old = center_raw - (Cut_width_half - 2);
 
         /* 左边线有效 */
-        if (left_old >= 0 && left_old < LCDW)
-        {
-            eight_left_crop[y_old] = (int16)left_old;
-            eight_left_valid_crop[y_old] = 1;
-        }
+        if (eight_left_raw_valid[y_raw] &&
+    left_old >= 0 &&
+    left_old < LCDW)
+{
+    eight_left_crop[y_old] = (int16)left_old;
+    eight_left_valid_crop[y_old] = 1;
+}
 
         /* 右边线有效 */
-        if (right_old >= 0 && right_old < LCDW)
-        {
-            eight_right_crop[y_old] = (int16)right_old;
-            eight_right_valid_crop[y_old] = 1;
-        }
+        if (eight_right_raw_valid[y_raw] &&
+    right_old >= 0 &&
+    right_old < LCDW)
+{
+    eight_right_crop[y_old] = (int16)right_old;
+    eight_right_valid_crop[y_old] = 1;
+}
 
         /* 中线有效 */
-        if (center_old >= 0 && center_old < LCDW)
-        {
-            eight_center_crop[y_old] = (int16)center_old;
-            eight_center_valid[y_old] = 1;
-        }
-    }
+        if (eight_left_raw_valid[y_raw] &&
+    eight_right_raw_valid[y_raw] &&
+    center_old >= 0 &&
+    center_old < LCDW)
+{
+    eight_center_crop[y_old] = (int16)center_old;
+    eight_center_valid[y_old] = 1;
+}
+}
 }
 /* 八邻域主处理函数
 
@@ -1101,37 +1132,39 @@ void EightNeighbor_PublishEdgesToImageDeal(void)
     int left_old;
     int right_old;
 
+    /* 八邻域本帧无效，保留 Get_AllLine() 的边线用于调试 */
+    if (!eight_frame.valid)
+    {
+        return;
+    }
+
     for (y_old = 0; y_old < LCDH; y_old++)
     {
         y_raw = y_old + Cut_high_top;
 
-        ImageDeal[y_old].IsLeftFind = 'W';
-        ImageDeal[y_old].IsRightFind = 'W';
-        ImageDeal[y_old].LeftBorder = 0;
-        ImageDeal[y_old].RightBorder = LCDW - 1;
-        ImageDeal[y_old].Center = ImageSensorMid;
-        ImageDeal[y_old].Wide = 0;
-
-        if (!eight_frame.valid ||
-            y_raw < eight_frame.highest ||
+        if (y_raw < eight_frame.highest ||
             y_raw >= EIGHT_IMAGE_H)
         {
             continue;
         }
 
-        left_raw = eight_frame.left[y_raw];
+        left_raw  = eight_frame.left[y_raw];
         right_raw = eight_frame.right[y_raw];
 
-        left_old = left_raw - (Cut_width_half - 2);
+        left_old  = left_raw  - (Cut_width_half - 2);
         right_old = right_raw - (Cut_width_half - 2);
 
-        if (left_old >= 0 && left_old < LCDW)
+        if (eight_left_raw_valid[y_raw] &&
+            left_old >= 0 &&
+            left_old < LCDW)
         {
             ImageDeal[y_old].LeftBorder = left_old;
             ImageDeal[y_old].IsLeftFind = 'T';
         }
 
-        if (right_old >= 0 && right_old < LCDW)
+        if (eight_right_raw_valid[y_raw] &&
+            right_old >= 0 &&
+            right_old < LCDW)
         {
             ImageDeal[y_old].RightBorder = right_old;
             ImageDeal[y_old].IsRightFind = 'T';
