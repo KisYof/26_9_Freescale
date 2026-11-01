@@ -3046,19 +3046,37 @@ uint8 Image_Process(void)
 
           //计算正常中线
           NormalMid_Update();
+          //在旧正常中线计算后运行八邻域控制算法
+          #if EIGHT_NEIGHBOR_ENABLE
+          EightNeighbor_Process(mt9v03x_image);
+          EightNeighbor_ToLegacy();
+          EightNeighbor_Compare();       /* 调试用，可以暂时保留 */
+          #endif
 
           Search_Border_OTSU(Pixle, LCDH, LCDW, LCDH - 2);
 
           //元素判断
           Scan_Element();
           //元素处理
-          Element_Handle();
+          Element_Handle();         
+//image_processing = 0;
+          
+          #if EIGHT_CONTROL_ENABLE
 
-          //
+if (!EightNeighbor_UpdateControl())
+{
+    ControlMidValue = ImageSensorMid;
+    ControlMidError = 0;
+    ControlMidValid = 0;
+}
+
+#else         
+
           ControlMid_Update();
+          #endif
+          
           //保护计算
           LineLost_Protection_Update();
-
           // 计算轨道斜率
           Track_Slope_Update();
 
@@ -3067,13 +3085,10 @@ uint8 Image_Process(void)
            {
               ImageStatus.Det_True = ControlMidError;
            }
-
-
-          #if EIGHT_NEIGHBOR_ENABLE
-          EightNeighbor_Process(mt9v03x_image);
-          EightNeighbor_ToLegacy();
-          EightNeighbor_Compare();
-          #endif
+           /* 仅调试显示：把八邻域左右边线写回 ImageDeal */
+#if EIGHT_NEIGHBOR_ENABLE
+        EightNeighbor_PublishEdgesToImageDeal();
+#endif          
            image_processing = 0;
           VisionFrameSequence++;
           if (2 == vision_runtime_reset_request)

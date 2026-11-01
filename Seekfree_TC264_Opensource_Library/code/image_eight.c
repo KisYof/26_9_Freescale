@@ -1047,3 +1047,65 @@ void EightNeighbor_Compare(void)
     eight_diff_average = count ? sum / count : -1;
     eight_diff_max = max_diff;
 }
+//以下是给调试显示用的数据搬运函数
+// 蓝色 = 八邻域左边界
+// 绿色 = 八邻域右边界
+// 红色 = 八邻域控制中线
+void EightNeighbor_PublishEdgesToImageDeal(void)
+{
+    int y_old;
+    int y_raw;
+    int left_raw;
+    int right_raw;
+    int left_old;
+    int right_old;
+
+    for (y_old = 0; y_old < LCDH; y_old++)
+    {
+        y_raw = y_old + Cut_high_top;
+
+        ImageDeal[y_old].IsLeftFind = 'W';
+        ImageDeal[y_old].IsRightFind = 'W';
+        ImageDeal[y_old].LeftBorder = 0;
+        ImageDeal[y_old].RightBorder = LCDW - 1;
+        ImageDeal[y_old].Center = ImageSensorMid;
+        ImageDeal[y_old].Wide = 0;
+
+        if (!eight_frame.valid ||
+            y_raw < eight_frame.highest ||
+            y_raw >= EIGHT_IMAGE_H)
+        {
+            continue;
+        }
+
+        left_raw = eight_frame.left[y_raw];
+        right_raw = eight_frame.right[y_raw];
+
+        left_old = left_raw - (Cut_width_half - 2);
+        right_old = right_raw - (Cut_width_half - 2);
+
+        if (left_old >= 0 && left_old < LCDW)
+        {
+            ImageDeal[y_old].LeftBorder = left_old;
+            ImageDeal[y_old].IsLeftFind = 'T';
+        }
+
+        if (right_old >= 0 && right_old < LCDW)
+        {
+            ImageDeal[y_old].RightBorder = right_old;
+            ImageDeal[y_old].IsRightFind = 'T';
+        }
+
+        if (ImageDeal[y_old].IsLeftFind == 'T' &&
+            ImageDeal[y_old].IsRightFind == 'T')
+        {
+            ImageDeal[y_old].Center =
+                (ImageDeal[y_old].LeftBorder +
+                 ImageDeal[y_old].RightBorder) / 2;
+
+            ImageDeal[y_old].Wide =
+                ImageDeal[y_old].RightBorder -
+                ImageDeal[y_old].LeftBorder;
+        }
+    }
+}
