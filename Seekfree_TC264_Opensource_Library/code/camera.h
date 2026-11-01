@@ -11,7 +11,7 @@
 #include "zf_common_headfile.h"
 
 #define LCDH 70                                              //用于图像处理的图像高度（行）
-#define LCDW 160                                            //用于图像处理的图像宽度（列）
+#define LCDW 160                                             //用于图像处理的图像宽度（列）
 
 #define Cut_high_bottom 30                                   //裁剪原图的底部
 #define Cut_high_top 20                                      //裁剪原图的顶部
@@ -89,6 +89,11 @@ typedef struct {
   int Center;                                                //中线
   int TopBorder;                                             //顶部边线
 
+  int LeftBorder_Inner;
+int LeftBorder_Outer;
+int RightBorder_Inner;
+int RightBorder_Outer;
+  
   //左右手法则扫线数据
   int LeftBoundary_First;                                    //左边界 保存第一次数据
   int RightBoundary_First;                                   //右边界 保存第一次数据

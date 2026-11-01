@@ -7,6 +7,7 @@
 #include "Camera.h"
 #include "Camera_tool.h"
 #include "zf_common_headfile.h"
+#include "image_eight.h"
 
 #define DISPLAY_FRAME_DIVIDER (2U)
 
