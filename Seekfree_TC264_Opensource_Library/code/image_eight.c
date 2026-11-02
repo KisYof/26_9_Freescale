@@ -1031,10 +1031,24 @@ void EightNeighbor_Process(const uint8 image[EIGHT_IMAGE_H][EIGHT_IMAGE_W])
     eight_points_l_num = 0;
     eight_points_r_num = 0;
 
-    if (!Eight_GetStartPoint(EIGHT_IMAGE_H - 2))
+   uint8 start_row;
+uint8 start_found = 0;
+
+for (start_row = EIGHT_IMAGE_H - 2;
+     start_row > 2;
+     start_row--)
+{
+    if (Eight_GetStartPoint(start_row))
     {
-        return;
+        start_found = 1;
+        break;
     }
+}
+
+if (!start_found)
+{
+    return;
+}
 
     Eight_SearchLeftRight(
         (uint16)(EIGHT_IMAGE_H * 3),
@@ -1141,10 +1155,17 @@ void EightNeighbor_PublishEdgesToImageDeal(void)
     // {
     //     return;
     // }
+   
 
     for (y_old = 0; y_old < LCDH; y_old++)
     {
         y_raw = y_old + Cut_high_top;
+         ImageDeal[y_old].IsLeftFind  = 'W';
+ImageDeal[y_old].IsRightFind = 'W';
+ImageDeal[y_old].LeftBorder  = -1;
+ImageDeal[y_old].RightBorder = -1;
+ImageDeal[y_old].Center      = -1;
+ImageDeal[y_old].Wide        = 0;
 
         if (y_raw < eight_frame.highest ||
             y_raw >= EIGHT_IMAGE_H)

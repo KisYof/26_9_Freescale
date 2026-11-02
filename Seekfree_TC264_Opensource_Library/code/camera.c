@@ -3017,7 +3017,7 @@ void Element_Handle()
     Protect_Without_Road(LCDH-6,LCDH-1,5,LCDW-6);
 
 }
-uint8 Image_Process(void)
+/*uint8 Image_Process(void)
 {
     if (mt9v03x_finish_flag == 1)                         //如果一帧图像采集完了，那么就可以对这副图像进行处理了。摄像头完成一帧 ->二值化
 
@@ -3050,7 +3050,7 @@ uint8 Image_Process(void)
           #if EIGHT_NEIGHBOR_ENABLE
           EightNeighbor_Process(mt9v03x_image);
           EightNeighbor_ToLegacy();
-          EightNeighbor_Compare();       /* 调试用，可以暂时保留 */
+          EightNeighbor_Compare();     
           #endif
 
           Search_Border_OTSU(Pixle, LCDH, LCDW, LCDH - 2);
@@ -3090,7 +3090,7 @@ if (!EightNeighbor_UpdateControl())
            {
               ImageStatus.Det_True = ControlMidError;
            }
-           /* 仅调试显示：把八邻域左右边线写回 ImageDeal */
+           // 仅调试显示：把八邻域左右边线写回 ImageDeal 
 #if EIGHT_NEIGHBOR_ENABLE
         EightNeighbor_PublishEdgesToImageDeal();
 #endif          
@@ -3101,6 +3101,169 @@ if (!EightNeighbor_UpdateControl())
               vision_runtime_reset_request = 0;
           }
           return 1;
+    }
+
+    return 0;
+}*/
+uint8 Image_Process(void)
+{
+    uint8 row;
+
+    if (mt9v03x_finish_flag == 1)
+    {
+        VisionFrameSequence++;
+        image_processing = 1;
+        mt9v03x_finish_flag = 0;
+
+        if (vision_runtime_reset_request == 1)
+        {
+            vision_runtime_reset_request = 2;
+            Camera_ClearRuntimeState();
+        }
+
+        memset(ImageDeal, 0, sizeof(ImageDeal));
+
+        /* 二值图仍然保留，用于图传和部分元素判断 */
+        Get_BinaryImage();
+
+#if EIGHT_NEIGHBOR_ENABLE
+
+        /*
+         * 八邻域先处理，并写回 ImageDeal。
+         * 后面的 NormalMid、元素判断、控制都使用这份数据。
+         */
+        EightNeighbor_Process(mt9v03x_image);
+        EightNeighbor_ToLegacy();
+        EightNeighbor_PublishEdgesToImageDeal();
+
+        /*
+         * 补齐 ImageDeal 的无效状态和统计量。
+         * 防止无效行仍保留 0/LCDW-1 的旧占位值。
+         */
+        ImageStatus.Miss_Left_lines = 0;
+        ImageStatus.Miss_Right_lines = 0;
+        ImageStatus.WhiteLine = 0;
+        ImageStatus.OFFLine = 3;
+
+        for (row = 0; row < LCDH; row++)
+        {
+            if (ImageDeal[row].IsLeftFind != 'T')
+            {
+                ImageDeal[row].IsLeftFind = 'W';
+                ImageDeal[row].LeftBorder = -1;
+
+                if (ImageStatus.Miss_Left_lines < 255)
+                {
+                    ImageStatus.Miss_Left_lines++;
+                }
+            }
+
+            if (ImageDeal[row].IsRightFind != 'T')
+            {
+                ImageDeal[row].IsRightFind = 'W';
+                ImageDeal[row].RightBorder = -1;
+
+                if (ImageStatus.Miss_Right_lines < 255)
+                {
+                    ImageStatus.Miss_Right_lines++;
+                }
+            }
+
+            if (ImageDeal[row].IsLeftFind != 'T' &&
+                ImageDeal[row].IsRightFind != 'T')
+            {
+                ImageDeal[row].Center = -1;
+                ImageDeal[row].Wide = 0;
+
+                if (ImageStatus.WhiteLine < 255)
+                {
+                    ImageStatus.WhiteLine++;
+                }
+            }
+            else if (ImageDeal[row].IsLeftFind == 'T' &&
+                     ImageDeal[row].IsRightFind == 'T')
+            {
+                ImageDeal[row].Center =
+                    (ImageDeal[row].LeftBorder +
+                     ImageDeal[row].RightBorder) / 2;
+
+                ImageDeal[row].Wide =
+                    ImageDeal[row].RightBorder -
+                    ImageDeal[row].LeftBorder;
+            }
+        }
+
+        /* 找到八邻域有效区域的最高行 */
+        for (row = LCDH - 1; row > 3; row--)
+        {
+            if (ImageDeal[row].IsLeftFind == 'T' &&
+                ImageDeal[row].IsRightFind == 'T' &&
+                ImageDeal[row].Wide > 20)
+            {
+                ImageStatus.OFFLine = row;
+                break;
+            }
+        }
+
+#else
+
+       /* 没有启用八邻域时，继续使用旧扫线 */
+        Get_BaseLine();
+        Get_AllLine();
+
+#endif
+
+        /* 普通中线 */
+        NormalMid_Update();
+
+        Search_Border_OTSU(Pixle, LCDH, LCDW, LCDH - 2);
+
+        /* 元素判断和处理 */
+        Scan_Element();
+        Element_Handle();
+
+#if EIGHT_NEIGHBOR_ENABLE
+        /* 圆环中线处理 */
+        EightNeighbor_ApplyRingCenter();
+#endif
+
+#if EIGHT_CONTROL_ENABLE
+
+        if (!EightNeighbor_UpdateControl())
+        {
+            ControlMidValue = ImageSensorMid;
+            ControlMidError = 0;
+            ControlMidValid = 0;
+        }
+
+#else
+
+        ControlMid_Update();
+
+#endif
+
+        LineLost_Protection_Update();
+        Track_Slope_Update();
+
+        if (ControlMidValid)
+        {
+            ImageStatus.Det_True = ControlMidError;
+        }
+
+#if EIGHT_NEIGHBOR_ENABLE
+        /* 调试显示最后再发布一次八邻域边线 */
+        EightNeighbor_PublishEdgesToImageDeal();
+#endif
+
+        image_processing = 0;
+        VisionFrameSequence++;
+
+        if (vision_runtime_reset_request == 2)
+        {
+            vision_runtime_reset_request = 0;
+        }
+
+        return 1;
     }
 
     return 0;
