@@ -2185,14 +2185,19 @@ void Element_Judgement_Left_Rings()
     //最终确认条件：1.Point2 明显在 Point1 上面,并且 Ring_Help_Flag = 1
     //2.右边线基本正常 左边线丢失超过20行 顶部扫描截止行较小 中线误差较小(说明左侧大面积，但车还在正常赛道方向，也可能是左环岛入口。)
 
-    if ((Left_RingsFlag_Point2_Ysite > Left_RingsFlag_Point1_Ysite+3 && Ring_Help_Flag == 1)
-            ||(ImageStatus.Miss_Right_lines<3&&ImageStatus.Miss_Left_lines>20&&ImageStatus.OFFLine < 10&&ImageStatus.Det_True<10))
-        if (Left_RingsFlag_Point1_Ysite > 0 && Left_RingsFlag_Point2_Ysite > 0 && Left_RingsFlag_Point2_Ysite > Left_RingsFlag_Point1_Ysite + 3 && Ring_Help_Flag == 1)
-    {
-        ImageFlag.image_element_rings = 1;         // 左环岛
-        ImageFlag.image_element_rings_flag = 1;    // 进入环岛流程
-        left_ring_num++;                           // 左环岛计数
-    }
+    if ((Left_RingsFlag_Point2_Ysite >
+        Left_RingsFlag_Point1_Ysite + 3 &&
+     Ring_Help_Flag == 1)
+    ||
+    (ImageStatus.Miss_Right_lines < 3 &&
+     ImageStatus.Miss_Left_lines > 20 &&
+     ImageStatus.OFFLine < 10 &&
+     ImageStatus.Det_True < 10))
+{
+    ImageFlag.image_element_rings = 1;// 左环岛
+    ImageFlag.image_element_rings_flag = 1;// 进入环岛流程
+    left_ring_num++;
+}
     Ring_Help_Flag = 0;
 }
 //--------------------------------------------------------------
