@@ -345,3 +345,64 @@ uint8 icm20602_init (void)
     }while(0);
     return return_state;
 }
+
+//-------------------------------------------------------------------------------------------------------------------
+// 函数简介     厂家等价原始接口初始化：先建立 Mode3 闲置电平，再唤醒并等待 100ms
+// 返回参数     uint8           0-通信可用 1-通信/唤醒失败；身份验证由采样结果单独报告
+// 备注信息     保留原严格 icm20602_init；此路径仅供未校准原始数据观察，不输出物理单位
+//-------------------------------------------------------------------------------------------------------------------
+uint8 icm20602_init_raw (void)
+{
+    uint8 device_id;
+#if !ICM20602_USE_SOFT_IIC
+    uint8 tx = 0, rx;
+#endif
+
+    gpio_init(ICM20602_CS_PIN, GPO, GPIO_HIGH, GPO_PUSH_PULL);
+    system_delay_ms(10);
+#if ICM20602_USE_SOFT_IIC
+    soft_iic_init(&icm20602_iic_struct, ICM20602_DEV_ADDR, ICM20602_SOFT_IIC_DELAY, ICM20602_SCL_PIN, ICM20602_SDA_PIN);
+#else
+    spi_init(ICM20602_SPI, SPI_MODE3, ICM20602_RAW_SPI_SPEED, ICM20602_SPC_PIN, ICM20602_SDI_PIN, ICM20602_SDO_PIN, SPI_CS_NULL);
+    // TC264 QSPI 首次传输后才输出 CPOL=1 的高闲置电平；CS 保持高，传感器不接收该字节。
+    spi_transfer_8bit(ICM20602_SPI, &tx, &rx, 1);
+    system_delay_us(2);
+#endif
+    icm20602_write_register(ICM20602_PWR_MGMT_1, 0x01);
+    system_delay_ms(100);
+    device_id = icm20602_read_register(ICM20602_WHO_AM_I);
+    return (0x00 == device_id || 0xFF == device_id
+         || 0x01 != icm20602_read_register(ICM20602_PWR_MGMT_1)) ? 1 : 0;
+}
+
+//-------------------------------------------------------------------------------------------------------------------
+// 函数简介     一次连续读取三轴加速度和三轴角速度；保留实际 ID 与身份验证结果
+// 返回参数     uint8           0-取样成功 1-输出指针无效或通信状态异常
+// 备注信息     数据未经校准；跳过连续块中的两个温度字节，不改写旧接口的全局量和转换因子
+//-------------------------------------------------------------------------------------------------------------------
+uint8 icm20602_get_raw (icm20602_raw_data_struct *data)
+{
+    uint8 raw[14];
+
+    if(NULL == data)
+    {
+        return 1;
+    }
+    data->acc_x = data->acc_y = data->acc_z = 0;
+    data->gyro_x = data->gyro_y = data->gyro_z = 0;
+    data->device_id = icm20602_read_register(ICM20602_WHO_AM_I);
+    data->identity_verified = (0x12 == data->device_id);
+    data->power_management = icm20602_read_register(ICM20602_PWR_MGMT_1);
+    if(0x00 == data->device_id || 0xFF == data->device_id || 0x01 != data->power_management)
+    {
+        return 1;
+    }
+    icm20602_read_registers(ICM20602_ACCEL_XOUT_H, raw, 14);
+    data->acc_x = (int16)(((uint16)raw[0] << 8) | raw[1]);
+    data->acc_y = (int16)(((uint16)raw[2] << 8) | raw[3]);
+    data->acc_z = (int16)(((uint16)raw[4] << 8) | raw[5]);
+    data->gyro_x = (int16)(((uint16)raw[8] << 8) | raw[9]);
+    data->gyro_y = (int16)(((uint16)raw[10] << 8) | raw[11]);
+    data->gyro_z = (int16)(((uint16)raw[12] << 8) | raw[13]);
+    return 0;
+}

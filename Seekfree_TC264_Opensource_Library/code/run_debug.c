@@ -26,7 +26,7 @@
 #elif (RUN_WIFI_IMAGE_ENABLE || RUN_WIFI_PID_DEBUG_ENABLE) && !CHEN
 #define WIFI_IMAGE_SSID        "KY"
 #define WIFI_IMAGE_PASSWORD    "asdfghjkl"
-#define WIFI_IMAGE_TARGET_IP   "10.176.40.16"
+#define WIFI_IMAGE_TARGET_IP   "10.105.219.16"
 #define WIFI_IMAGE_TARGET_PORT "8086"
 #define WIFI_IMAGE_LOCAL_PORT  "6666"
 #endif
@@ -93,6 +93,28 @@ static seekfree_assistant_debug_param_struct wifi_debug_param;
 static run_pid_group_enum wifi_pid_group = RUN_PID_STEER;
 #endif
 
+#if RUN_IMU_ENABLE && RUN_IMU_UART_DEBUG_ENABLE && !RUN_UART_PID_DEBUG_ENABLE
+static volatile uint8 imu_debug_send_flag = 0;
+static uint8 imu_debug_tick_count = 0;
+#endif
+
+// 使用 run 的只读副本；available 与 identity_verified 分开输出，数据只标为 RAW。
+void run_debug_imu_report(void)
+{
+#if RUN_IMU_ENABLE && RUN_IMU_UART_DEBUG_ENABLE && !RUN_UART_PID_DEBUG_ENABLE
+    run_imu_monitor_t monitor;
+
+    run_get_imu(&monitor);
+    printf("[IMU RAW] ready=%u id=%02X verified=%u pwr=%02X n=%lu age=%u acc=%d,%d,%d gyro=%d,%d,%d\r\n",
+           (unsigned int)monitor.available, (unsigned int)monitor.device_id,
+           (unsigned int)monitor.identity_verified, (unsigned int)monitor.power_management,
+           (unsigned long)monitor.sample_count,
+           (unsigned int)monitor.sample_age_ms,
+           monitor.acc_x, monitor.acc_y, monitor.acc_z,
+           monitor.gyro_x, monitor.gyro_y, monitor.gyro_z);
+#endif
+}
+
 // ------------------ 内部函数前向声明 ------------------
 #if RUN_UART_PID_DEBUG_ENABLE
 static void pid_debug_uart_receive(void);
@@ -154,6 +176,13 @@ void run_debug_init(void)
 
 void run_debug_while(void)
 {
+#if RUN_IMU_ENABLE && RUN_IMU_UART_DEBUG_ENABLE && !RUN_UART_PID_DEBUG_ENABLE
+    if (imu_debug_send_flag)
+    {
+        imu_debug_send_flag = 0;
+        run_debug_imu_report();
+    }
+#endif
 #if RUN_UART_PID_DEBUG_ENABLE
     run_params_t before;
     run_get_params(&uart_params);
@@ -202,6 +231,14 @@ void run_debug_while(void)
 
 void run_debug_tick_10ms(void)
 {
+#if RUN_IMU_ENABLE && RUN_IMU_UART_DEBUG_ENABLE && !RUN_UART_PID_DEBUG_ENABLE
+    imu_debug_tick_count++;
+    if (imu_debug_tick_count >= 20U)
+    {
+        imu_debug_tick_count = 0;
+        imu_debug_send_flag = 1;
+    }
+#endif
 #if (RUN_WIFI_PID_DEBUG_ENABLE || RUN_UART_PID_DEBUG_ENABLE)
     pid_debug_send_flag = 1;
 #endif

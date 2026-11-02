@@ -19,7 +19,7 @@
 
 // 1: 新速度规划；0: 原版速度映射/直道许可。安全修复始终保留。
 #ifndef RUN_SPEED_PLANNER_ENABLE
-#define RUN_SPEED_PLANNER_ENABLE (1)
+#define RUN_SPEED_PLANNER_ENABLE (0)
 #endif
 
 // 0: 保留原示波器通道；1: 速度规划观测，优先于模糊 PD 调试模式。
@@ -39,8 +39,32 @@
 #define RUN_UART_PID_DEBUG_ENABLE (0)   // 串口 PID 文本调参与数据输出
 #endif
 #ifndef CHEN
-#define CHEN (1)
+#define CHEN (0)
 #endif
+
+// IMU 只作原始数据观测；采样在主循环完成，不进入当前方向/速度闭环。
+#ifndef RUN_IMU_ENABLE
+#define RUN_IMU_ENABLE (0) // 0: 关闭（默认）；1: 初始化并在主循环读取陀螺仪
+#endif
+#ifndef RUN_IMU_UART_DEBUG_ENABLE
+#define RUN_IMU_UART_DEBUG_ENABLE (1) // 200ms 输出一次；启用串口 PID 时自动停用，避免混流
+#endif
+
+typedef struct
+{
+    int16 acc_x;
+    int16 acc_y;
+    int16 acc_z;
+    int16 gyro_x;
+    int16 gyro_y;
+    int16 gyro_z;
+    uint8 available;
+    uint8 device_id;
+    uint8 identity_verified;
+    uint8 power_management;
+    uint32 sample_count;
+    uint16 sample_age_ms;       // 主循环受图传/联网延迟时可观测，饱和到 65535ms
+} run_imu_monitor_t;
 
 // 运行状态，只由控制中断修改，主循环只读取。
 typedef enum
@@ -136,6 +160,7 @@ void run_while(void);    // 双核同步后调用；首次启动调度/通信，
 // ------------------ UI/通信使用的控制服务接口 ------------------
 void run_request_toggle(void);       // 只投递启停请求，状态由控制中断改写
 void run_get_monitor(run_monitor_t *monitor);
+void run_get_imu(run_imu_monitor_t *monitor); // 一致副本；不暴露硬件/设备层内部对象
 void run_get_params(run_params_t *params);
 uint8 run_params_equal(const run_params_t *left, const run_params_t *right);
 uint8 run_apply_params(const run_params_t *params); // 仅 IDLE 且无启动请求时接受

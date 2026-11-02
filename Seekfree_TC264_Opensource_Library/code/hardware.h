@@ -14,6 +14,24 @@ typedef struct
     int16 raw_right_speed;  // 右轮原始线速度，单位 cm/s，正负表示前进/后退
 } hardware_feedback_t;
 
+// ------------------ IMU 原始反馈：仅硬件状态与原始采样，不参与控制计算 ------------------
+typedef struct
+{
+    int16 acc_x;
+    int16 acc_y;
+    int16 acc_z;
+    int16 gyro_x;
+    int16 gyro_y;
+    int16 gyro_z;
+    uint8 available;            // 原始通信及唤醒状态可用，不等同于标准芯片身份通过
+    uint8 device_id;
+    uint8 identity_verified;
+    uint8 power_management;
+} hardware_imu_feedback_t;
+
+void hardware_imu_init(void);                              // 控制定时器启动前调用一次，不因异常 ID 无限重试
+void hardware_sample_imu(hardware_imu_feedback_t *feedback); // 主循环采样，不在控制中断中访问 SPI
+
 void hardware_init(void);                                    // 一次性初始化电机、编码器、舵机，须在控制中断启动前调用
 void hardware_sample_2ms(hardware_feedback_t *feedback);      // 一次采样并返回左右轮原始速度，固定 2ms 调用
 void hardware_reset_feedback(void);                          // 清空编码器脉冲与速度反馈，启动/重跑前调用

@@ -196,6 +196,25 @@ extern float icm20602_transition_factor[2];                                     
 
 
 //================================================声明 ICM20602 基础函数================================================
+// 厂家等价原始采样：Mode3/1MHz，身份校验结果与通信可用状态分开报告。
+// 此接口不配置量程，不使用 icm20602_transition_factor，不将异常 ID 判作正常。
+#define ICM20602_RAW_SPI_SPEED      (1000000U)
+typedef struct
+{
+    int16 acc_x;
+    int16 acc_y;
+    int16 acc_z;
+    int16 gyro_x;
+    int16 gyro_y;
+    int16 gyro_z;
+    uint8 device_id;
+    uint8 identity_verified;
+    uint8 power_management;
+} icm20602_raw_data_struct;
+
+uint8   icm20602_init_raw           (void);                                     // 0-原始通信可用 1-唤醒/通信失败；不代表标准身份通过
+uint8   icm20602_get_raw            (icm20602_raw_data_struct *data);            // 0-取样成功 1-无效输出/通信状态异常
+
 void    icm20602_get_acc            (void);                                     // 获取 ICM20602 加速度计数据
 void    icm20602_get_gyro           (void);                                     // 获取 ICM20602 陀螺仪数据
 uint8   icm20602_init               (void);                                     // 初始化 ICM20602

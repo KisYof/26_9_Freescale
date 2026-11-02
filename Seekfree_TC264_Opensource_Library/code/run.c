@@ -12,6 +12,7 @@
 // 1ms 基础节拍下分出 2ms 速度任务和 10ms 方向任务；以下参数保持原来的实际时长。
 #define RUN_SPEED_PERIOD_TICKS (2U)
 #define RUN_DIRECTION_PERIOD_TICKS (10U)
+#define RUN_IMU_PERIOD_TICKS (5U)      // 仅置采样请求；实际 SPI 留在主循环，允许合并积压请求
 #define RUN_VISION_TIMEOUT_TICKS (20U) // 方向任务计数：视觉 200ms 未更新即判视觉超时
 #define RUN_STALL_GRACE_TICKS (150U)   // 速度任务计数：启动后 300ms 内不做堵转判断
 #define RUN_STALL_CONFIRM_TICKS (150U) // 速度任务计数：堵转条件连续成立 300ms 才确认
@@ -92,6 +93,12 @@ static volatile int16 run_curve_risk = 0; // 速度规划专用绝对倾斜风�
 static uint32 run_curve_risk_x4 = 0;     // Q2 保留小数，下降权重 3/4
 #endif
 static uint32 run_speed_planner_frame_sequence = 0;
+static run_imu_monitor_t run_imu_monitor;
+static volatile uint16 run_imu_age_ms = 65535U;
+#if RUN_IMU_ENABLE
+static uint8 run_imu_tick_count = 0;
+static volatile uint8 run_imu_sample_pending = 0;
+#endif
 static volatile uint8 run_ready = 0;
 static volatile uint8 run_toggle_request = 0;
 static uint8 run_start_pending = 0;     // KEY1 请求后等待 CPU1 完成原有复位接口
@@ -205,11 +212,65 @@ static void run_reset_speed_feedback(void)
     encoder_left = encoder_right = 0;
 }
 
+#if RUN_IMU_ENABLE
+// 主循环访问 SPI；采完后只在短临界区发布快照，通信格式化不占用临界区。
+static void run_sample_imu(void)
+{
+    hardware_imu_feedback_t feedback;
+    uint32 interrupt_state;
+
+    hardware_sample_imu(&feedback);
+    interrupt_state = interrupt_global_disable();
+    run_imu_monitor.available = feedback.available;
+    run_imu_monitor.device_id = feedback.device_id;
+    run_imu_monitor.identity_verified = feedback.identity_verified;
+    run_imu_monitor.power_management = feedback.power_management;
+    if (feedback.available)
+    {
+        run_imu_monitor.acc_x = feedback.acc_x;
+        run_imu_monitor.acc_y = feedback.acc_y;
+        run_imu_monitor.acc_z = feedback.acc_z;
+        run_imu_monitor.gyro_x = feedback.gyro_x;
+        run_imu_monitor.gyro_y = feedback.gyro_y;
+        run_imu_monitor.gyro_z = feedback.gyro_z;
+        run_imu_monitor.sample_count++;
+        run_imu_age_ms = 0;
+    }
+    interrupt_global_enable(interrupt_state);
+}
+
+static void run_imu_while(void)
+{
+    uint8 sample_pending;
+    uint32 interrupt_state = interrupt_global_disable();
+
+    sample_pending = run_imu_sample_pending;
+    run_imu_sample_pending = 0;
+    interrupt_global_enable(interrupt_state);
+    if (sample_pending)
+    {
+        run_sample_imu();
+    }
+}
+#endif
+
+// 与现有 monitor 接口一致：先复制副本，再在临界区外使用。
+void run_get_imu(run_imu_monitor_t *monitor)
+{
+    uint32 interrupt_state = interrupt_global_disable();
+
+    *monitor = run_imu_monitor;
+    monitor->sample_age_ms = run_imu_age_ms;
+    interrupt_global_enable(interrupt_state);
+}
+
 // 第一阶段：main 在摄像头初始化前调用，先保证执行器安全并准备屏幕。
 // 此处不启动定时器、不联网，摄像头重试期间不会响应启动请求。
 void run_init(void)
 {
     hardware_init();
+    memset(&run_imu_monitor, 0, sizeof(run_imu_monitor));
+    run_imu_age_ms = 65535U;
     PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3500, -3500, 0, 0);
     PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3500, -3500, 0, 0);
 #if RUN_STEER_FUZZY_ENABLE
@@ -231,6 +292,16 @@ static void run_start_runtime(void)
 {
     run_toggle_request = 0;
     run_ready = 1;
+    // 屏幕/摄像头和双核同步完成后再建立 SPI0，避免后续启动阶段覆盖采样状态。
+    memset(&run_imu_monitor, 0, sizeof(run_imu_monitor));
+    run_imu_age_ms = 65535U;
+#if RUN_IMU_ENABLE
+    run_imu_tick_count = 0;
+    run_imu_sample_pending = 0;
+    hardware_imu_init();
+    run_sample_imu();
+#endif
+    run_debug_imu_report();
     pit_ms_init(CCU60_CH0, 1);
     pit_ms_init(CCU60_CH1, 10);
     run_ui_while();
@@ -243,6 +314,9 @@ void run_while(void)
     {
         run_start_runtime();
     }
+#if RUN_IMU_ENABLE
+    run_imu_while();
+#endif
     run_ui_while();
     run_debug_while();
 }
@@ -951,6 +1025,18 @@ static void run_speed_tick_2ms(void)
 // 1ms 基础调度：10ms 与 2ms 同时到期时，严格先方向、后速度。
 static void run_control_tick_1ms(void)
 {
+#if RUN_IMU_ENABLE
+    if (run_imu_age_ms < 65535U)
+    {
+        run_imu_age_ms++;
+    }
+    run_imu_tick_count++;
+    if (run_imu_tick_count >= RUN_IMU_PERIOD_TICKS)
+    {
+        run_imu_tick_count = 0;
+        run_imu_sample_pending = 1;
+    }
+#endif
     run_direction_tick_count++;
     run_speed_tick_count++;
 

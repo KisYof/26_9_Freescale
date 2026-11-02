@@ -143,3 +143,33 @@ void hardware_stop(void)
     hardware_set_motors(0, 0);
     hardware_set_servo(0);
 }
+
+// 厂家等价原始接口：设备协议与 Mode3 首帧处理全部留在库内。
+void hardware_imu_init(void)
+{
+    (void)icm20602_init_raw(); // 初始化可失败；后续逐次采样报告真实通信状态，不永久锁存失败
+}
+
+// 映射库数据到硬件反馈，运行层不依赖设备库的类型或全局变量。
+void hardware_sample_imu(hardware_imu_feedback_t *feedback)
+{
+    icm20602_raw_data_struct raw;
+    uint8 sample_failed;
+
+    memset(feedback, 0, sizeof(*feedback));
+    sample_failed = icm20602_get_raw(&raw);
+    feedback->device_id = raw.device_id;
+    feedback->identity_verified = raw.identity_verified;
+    feedback->power_management = raw.power_management;
+    if (sample_failed)
+    {
+        return;
+    }
+    feedback->acc_x = raw.acc_x;
+    feedback->acc_y = raw.acc_y;
+    feedback->acc_z = raw.acc_z;
+    feedback->gyro_x = raw.gyro_x;
+    feedback->gyro_y = raw.gyro_y;
+    feedback->gyro_z = raw.gyro_z;
+    feedback->available = 1;
+}
