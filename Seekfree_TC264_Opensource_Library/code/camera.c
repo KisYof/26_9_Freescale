@@ -9,7 +9,6 @@
 #include "isr_config.h"
 #include "camera.h"
 #include "math.h"
-#include "image_eight.h"
 
 #include <stdio.h>
 
@@ -168,13 +167,13 @@ uint8 Half_Ring_Wide_small[LCDH]=
 //建立元素前瞻行参数表
 static const uint8 Vision_ProspectRow[VP_COUNT] =
 {
-    26,     // 普通赛道：看远一点
+    30,     // 普通赛道：看远一点
     32,     // 十字：看中间
     30,     // 斑马线
-    38,     // 圆环入口：看近一点
+    35,     // 圆环入口：看近一点
     42,     // 圆环内部
     45,     // 大圆环内部
-    25      // 圆环出口
+    28      // 圆环出口
 };
 
 uint8 ControlProspectType = VP_NORMAL;
@@ -2186,8 +2185,8 @@ void Element_Judgement_Left_Rings()
     //最终确认条件：1.Point2 明显在 Point1 上面,并且 Ring_Help_Flag = 1
     //2.右边线基本正常 左边线丢失超过20行 顶部扫描截止行较小 中线误差较小(说明左侧大面积，但车还在正常赛道方向，也可能是左环岛入口。)
 
-    /*if ((Left_RingsFlag_Point2_Ysite > Left_RingsFlag_Point1_Ysite+3 && Ring_Help_Flag == 1)
-            ||(ImageStatus.Miss_Right_lines<3&&ImageStatus.Miss_Left_lines>20&&ImageStatus.OFFLine < 10&&ImageStatus.Det_True<10))*/
+    if ((Left_RingsFlag_Point2_Ysite > Left_RingsFlag_Point1_Ysite+3 && Ring_Help_Flag == 1)
+            ||(ImageStatus.Miss_Right_lines<3&&ImageStatus.Miss_Left_lines>20&&ImageStatus.OFFLine < 10&&ImageStatus.Det_True<10))
         if (Left_RingsFlag_Point1_Ysite > 0 && Left_RingsFlag_Point2_Ysite > 0 && Left_RingsFlag_Point2_Ysite > Left_RingsFlag_Point1_Ysite + 3 && Ring_Help_Flag == 1)
     {
         ImageFlag.image_element_rings = 1;         // 左环岛
@@ -2300,7 +2299,7 @@ void Element_Handle_Left_Rings()
         ImageFlag.image_element_rings_flag = 5;//左边线丢失数明显减少，车已经进入环岛区域，状态5
     }
 
-            Small_Rings_HalfWide_Offset=30;
+            Small_Rings_HalfWide_Offset=25;
     //进环
     if(ImageFlag.image_element_rings_flag == 5 && ImageStatus.Miss_Right_lines>15)//
     {
@@ -2378,34 +2377,32 @@ void Element_Handle_Left_Rings()
 //        }
         for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
            {
-               int left  = ImageDeal[Ysite].LeftBorder;
-               int right = ImageDeal[Ysite].RightBorder;
-               int wide  = right - left;
+            //    int left  = ImageDeal[Ysite].LeftBorder;
+            //    int right = ImageDeal[Ysite].RightBorder;
+            //    int wide  = right - left;
                int center;
 
-               /* 左右边界都有效，先用正常中线 */
-               if (left > 2 &&
-                   right < LCDW - 2 &&
-                   wide >= 20 &&
-                   wide <= 140)
-               {
-                   center = (left + right) / 2;
-               }
-               /* 只剩右边线，用右边界往左推 */
-               else if (right > 2 && right < LCDW - 2)
-               {
-                   center = right - Half_Road_Wide[Ysite];
-               }
-               /* 只剩左边线，用左边界往右推 */
-               else if (left > 2 && left < LCDW - 2)
-               {
-                   center = left + Half_Road_Wide[Ysite];
-               }
-               /* 两边都不好，保持上一行中点 */
-               else
-               {
-                   center = ImageDeal[Ysite].Center;
-               }
+               /* 左环入口：左边线正在消失，优先用右边界 */
+        if (ImageDeal[Ysite].IsRightFind == 'T' &&
+            ImageDeal[Ysite].RightBorder > 2 &&
+            ImageDeal[Ysite].RightBorder < LCDW - 6)
+        {
+            center = ImageDeal[Ysite].RightBorder -
+                     Half_Road_Wide[Ysite];
+        }
+        /* 右边界真的不可信时，才用左边界兜底 */
+        else if (ImageDeal[Ysite].IsLeftFind == 'T' &&
+                 ImageDeal[Ysite].LeftBorder > 2 &&
+                 ImageDeal[Ysite].LeftBorder < LCDW - 6)
+        {
+            center = ImageDeal[Ysite].LeftBorder +
+                     Half_Road_Wide[Ysite];
+        }
+        /* 两边都不可信，保持原值 */
+        else
+        {
+            center = ImageDeal[Ysite].Center;
+        }
 
                LimitL(center);
                LimitH(center);
@@ -2528,7 +2525,7 @@ void Element_Handle_Right_Rings()
     //大小圆环判断
     if(ImageFlag.image_element_rings_flag == 5)
     {
-        Small_Rings_HalfWide_Offset=30;
+        Small_Rings_HalfWide_Offset=25;
     }
 //    进环
     if(ImageFlag.image_element_rings_flag == 5 && ImageStatus.Miss_Left_lines>15)
@@ -2617,34 +2614,31 @@ void Element_Handle_Right_Rings()
 //        }
         for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
             {
-                int left  = ImageDeal[Ysite].LeftBorder;
-                int right = ImageDeal[Ysite].RightBorder;
-                int wide  = right - left;
+                // int left  = ImageDeal[Ysite].LeftBorder;
+                // int right = ImageDeal[Ysite].RightBorder;
+                // int wide  = right - left;
                 int center;
 
-                /* 两边都有效时，先使用正常左右边界中线 */
-                if (left > 2 &&
-                    right < LCDW - 2 &&
-                    wide >= 20 &&
-                    wide <= 140)
-                {
-                    center = (left + right) / 2;
-                }
-                /* 只剩右边线，说明左边丢失，用右边界往左推 */
-                else if (right > 2 && right < LCDW - 2)
-                {
-                    center = right - Half_Road_Wide[Ysite];
-                }
-                /* 只剩左边线，用左边界往右推 */
-                else if (left > 2 && left < LCDW - 2)
-                {
-                    center = left + Half_Road_Wide[Ysite];
-                }
-                /* 两边都不可靠，保持上一帧中点 */
-                else
-                {
-                    center = ImageDeal[Ysite].Center;
-                }
+                /* 右环入口：右边线正在消失，优先用左边界 */
+        if (ImageDeal[Ysite].IsLeftFind == 'T' &&
+            ImageDeal[Ysite].LeftBorder > 2 &&
+            ImageDeal[Ysite].LeftBorder < LCDW - 6)
+        {
+            center = ImageDeal[Ysite].LeftBorder +
+                     Half_Road_Wide[Ysite];
+        }
+        else if (ImageDeal[Ysite].IsRightFind == 'T' &&
+                 ImageDeal[Ysite].RightBorder > 2 &&
+                 ImageDeal[Ysite].RightBorder < LCDW - 6)
+        {
+            center = ImageDeal[Ysite].RightBorder -
+                     Half_Road_Wide[Ysite];
+        }
+        else
+        {
+            center = ImageDeal[Ysite].Center;
+        }
+
 
                 LimitL(center);
                 LimitH(center);
@@ -2911,61 +2905,28 @@ void ControlMid_Update(void)
 volatile uint8 LineLostCount = 0;
 volatile uint8 LineLostFlag  = 0;
 volatile uint8 VisionStopFlag = 0;
-volatile uint8 ElementLostCount = 0;
-#define LINE_LOST_SLOW_FRAMES       3
-#define LINE_LOST_STOP_FRAMES       30
-#define ELEMENT_LOST_STOP_FRAMES    60
-
 void LineLost_Protection_Update(void)
 {
-    uint8 element_active;
-
-    element_active =
-        (ImageFlag.image_element_rings != 0) ||
-        (ImageFlag.Cross_Flag == 1) ||
-        (ImageFlag.Zebra_Flag == 1);
-
-    if (ControlMidValid)
+    if (ControlMidValid)//若ControlMidValid = 1：LineLostCount 清零
     {
         LineLostCount = 0;
-        LineLostFlag = 0;
-        ElementLostCount = 0;
+        LineLostFlag  = 0;
         return;
     }
-
-    /* 圆环、十字、斑马线期间不要按普通赛道丢线处理 */
-    if (element_active)
-    {
-        if (ElementLostCount < 255)
-        {
-            ElementLostCount++;
-        }
-
-        LineLostFlag = 0;   // 元素内不直接把普通丢线标志置1
-
-        if (ElementLostCount >= ELEMENT_LOST_STOP_FRAMES)
-        {
-            VisionStopFlag = 1;
-        }
-
-        return;
-    }
-
-    ElementLostCount = 0;
 
     if (LineLostCount < 255)
     {
         LineLostCount++;
     }
 
-    if (LineLostCount >= LINE_LOST_SLOW_FRAMES)
+    if (LineLostCount >= 5)//连续 5 帧没有有效控制中线时
     {
-        LineLostFlag = 1;
+        LineLostFlag = 1;// LineLostFlag标志位置1 控制组看到它以后可以减速
     }
 
-    if (LineLostCount >= LINE_LOST_STOP_FRAMES)
+    if (LineLostCount >= 30)//连续 30 帧无效
     {
-        VisionStopFlag = 1;
+        VisionStopFlag = 1;//VisionStopFlag置1 控制组看到它以后可以停车
     }
 }
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -3017,7 +2978,7 @@ void Element_Handle()
     Protect_Without_Road(LCDH-6,LCDH-1,5,LCDW-6);
 
 }
-/*uint8 Image_Process(void)
+uint8 Image_Process(void)
 {
     if (mt9v03x_finish_flag == 1)                         //如果一帧图像采集完了，那么就可以对这副图像进行处理了。摄像头完成一帧 ->二值化
 
@@ -3046,42 +3007,19 @@ void Element_Handle()
 
           //计算正常中线
           NormalMid_Update();
-          //在旧正常中线计算后运行八邻域控制算法
-          #if EIGHT_NEIGHBOR_ENABLE
-          EightNeighbor_Process(mt9v03x_image);
-          EightNeighbor_ToLegacy();
-          EightNeighbor_Compare();     
-          #endif
 
           Search_Border_OTSU(Pixle, LCDH, LCDW, LCDH - 2);
 
           //元素判断
           Scan_Element();
           //元素处理
-          Element_Handle();         
-//image_processing = 0;
+          Element_Handle();
 
-#if EIGHT_NEIGHBOR_ENABLE
-EightNeighbor_ApplyRingCenter();
-#endif
-
-          
-          #if EIGHT_CONTROL_ENABLE
-
-if (!EightNeighbor_UpdateControl())
-{
-    ControlMidValue = ImageSensorMid;
-    ControlMidError = 0;
-    ControlMidValid = 0;
-}
-
-#else         
-
+          //
           ControlMid_Update();
-          #endif
-          
           //保护计算
           LineLost_Protection_Update();
+
           // 计算轨道斜率
           Track_Slope_Update();
 
@@ -3090,180 +3028,15 @@ if (!EightNeighbor_UpdateControl())
            {
               ImageStatus.Det_True = ControlMidError;
            }
-           // 仅调试显示：把八邻域左右边线写回 ImageDeal 
-#if EIGHT_NEIGHBOR_ENABLE
-        EightNeighbor_PublishEdgesToImageDeal();
-#endif          
-           image_processing = 0;
+
+
+          image_processing = 0;
           VisionFrameSequence++;
           if (2 == vision_runtime_reset_request)
           {
               vision_runtime_reset_request = 0;
           }
           return 1;
-    }
-
-    return 0;
-}*/
-uint8 Image_Process(void)
-{
-    uint8 row;
-
-    if (mt9v03x_finish_flag == 1)
-    {
-        VisionFrameSequence++;
-        image_processing = 1;
-        mt9v03x_finish_flag = 0;
-
-        if (vision_runtime_reset_request == 1)
-        {
-            vision_runtime_reset_request = 2;
-            Camera_ClearRuntimeState();
-        }
-
-        memset(ImageDeal, 0, sizeof(ImageDeal));
-
-        /* 二值图仍然保留，用于图传和部分元素判断 */
-        Get_BinaryImage();
-
-#if EIGHT_NEIGHBOR_ENABLE
-
-        /*
-         * 八邻域先处理，并写回 ImageDeal。
-         * 后面的 NormalMid、元素判断、控制都使用这份数据。
-         */
-        EightNeighbor_Process(mt9v03x_image);
-        EightNeighbor_ToLegacy();
-        EightNeighbor_PublishEdgesToImageDeal();
-
-        /*
-         * 补齐 ImageDeal 的无效状态和统计量。
-         * 防止无效行仍保留 0/LCDW-1 的旧占位值。
-         */
-        ImageStatus.Miss_Left_lines = 0;
-        ImageStatus.Miss_Right_lines = 0;
-        ImageStatus.WhiteLine = 0;
-        ImageStatus.OFFLine = 3;
-
-        for (row = 0; row < LCDH; row++)
-        {
-            if (ImageDeal[row].IsLeftFind != 'T')
-            {
-                ImageDeal[row].IsLeftFind = 'W';
-                ImageDeal[row].LeftBorder = -1;
-
-                if (ImageStatus.Miss_Left_lines < 255)
-                {
-                    ImageStatus.Miss_Left_lines++;
-                }
-            }
-
-            if (ImageDeal[row].IsRightFind != 'T')
-            {
-                ImageDeal[row].IsRightFind = 'W';
-                ImageDeal[row].RightBorder = -1;
-
-                if (ImageStatus.Miss_Right_lines < 255)
-                {
-                    ImageStatus.Miss_Right_lines++;
-                }
-            }
-
-            if (ImageDeal[row].IsLeftFind != 'T' &&
-                ImageDeal[row].IsRightFind != 'T')
-            {
-                ImageDeal[row].Center = -1;
-                ImageDeal[row].Wide = 0;
-
-                if (ImageStatus.WhiteLine < 255)
-                {
-                    ImageStatus.WhiteLine++;
-                }
-            }
-            else if (ImageDeal[row].IsLeftFind == 'T' &&
-                     ImageDeal[row].IsRightFind == 'T')
-            {
-                ImageDeal[row].Center =
-                    (ImageDeal[row].LeftBorder +
-                     ImageDeal[row].RightBorder) / 2;
-
-                ImageDeal[row].Wide =
-                    ImageDeal[row].RightBorder -
-                    ImageDeal[row].LeftBorder;
-            }
-        }
-
-        /* 找到八邻域有效区域的最高行 */
-        for (row = LCDH - 1; row > 3; row--)
-        {
-            if (ImageDeal[row].IsLeftFind == 'T' &&
-                ImageDeal[row].IsRightFind == 'T' &&
-                ImageDeal[row].Wide > 20)
-            {
-                ImageStatus.OFFLine = row;
-                break;
-            }
-        }
-
-#else
-
-       /* 没有启用八邻域时，继续使用旧扫线 */
-        Get_BaseLine();
-        Get_AllLine();
-
-#endif
-
-        /* 普通中线 */
-        NormalMid_Update();
-
-        Search_Border_OTSU(Pixle, LCDH, LCDW, LCDH - 2);
-
-        /* 元素判断和处理 */
-        Scan_Element();
-        Element_Handle();
-
-#if EIGHT_NEIGHBOR_ENABLE
-        /* 圆环中线处理 */
-        EightNeighbor_ApplyRingCenter();
-#endif
-
-#if EIGHT_CONTROL_ENABLE
-
-        if (!EightNeighbor_UpdateControl())
-        {
-            ControlMidValue = ImageSensorMid;
-            ControlMidError = 0;
-            ControlMidValid = 0;
-        }
-
-#else
-
-        ControlMid_Update();
-
-#endif
-
-        LineLost_Protection_Update();
-        Track_Slope_Update();
-
-        if (ControlMidValid)
-        {
-            ImageStatus.Det_True = ControlMidError;
-        }
-
-#if EIGHT_NEIGHBOR_ENABLE
-        /* 调试显示最后再发布一次八邻域边线 */
-        EightNeighbor_PublishEdgesToImageDeal();
-#endif
-
-        image_processing = 0;
-        VisionFrameSequence++;
-
-        if (vision_runtime_reset_request == 2)
-        {
-            vision_runtime_reset_request = 0;
-        }
-
-        return 1;
     }
 
     return 0;
