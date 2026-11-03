@@ -2185,19 +2185,14 @@ void Element_Judgement_Left_Rings()
     //最终确认条件：1.Point2 明显在 Point1 上面,并且 Ring_Help_Flag = 1
     //2.右边线基本正常 左边线丢失超过20行 顶部扫描截止行较小 中线误差较小(说明左侧大面积，但车还在正常赛道方向，也可能是左环岛入口。)
 
-    if ((Left_RingsFlag_Point2_Ysite >
-        Left_RingsFlag_Point1_Ysite + 3 &&
-     Ring_Help_Flag == 1)
-    ||
-    (ImageStatus.Miss_Right_lines < 3 &&
-     ImageStatus.Miss_Left_lines > 20 &&
-     ImageStatus.OFFLine < 10 &&
-     ImageStatus.Det_True < 10))
-{
-    ImageFlag.image_element_rings = 1;// 左环岛
-    ImageFlag.image_element_rings_flag = 1;// 进入环岛流程
-    left_ring_num++;
-}
+    /*if ((Left_RingsFlag_Point2_Ysite > Left_RingsFlag_Point1_Ysite+3 && Ring_Help_Flag == 1)
+            ||(ImageStatus.Miss_Right_lines<3&&ImageStatus.Miss_Left_lines>20&&ImageStatus.OFFLine < 10&&ImageStatus.Det_True<10))*/
+        if (Left_RingsFlag_Point1_Ysite > 0 && Left_RingsFlag_Point2_Ysite > 0 && Left_RingsFlag_Point2_Ysite > Left_RingsFlag_Point1_Ysite + 3 && Ring_Help_Flag == 1)
+    {
+        ImageFlag.image_element_rings = 1;         // 左环岛
+        ImageFlag.image_element_rings_flag = 1;    // 进入环岛流程
+        left_ring_num++;                           // 左环岛计数
+    }
     Ring_Help_Flag = 0;
 }
 //--------------------------------------------------------------
@@ -2304,7 +2299,7 @@ void Element_Handle_Left_Rings()
         ImageFlag.image_element_rings_flag = 5;//左边线丢失数明显减少，车已经进入环岛区域，状态5
     }
 
-            Small_Rings_HalfWide_Offset=25;
+            Small_Rings_HalfWide_Offset=30;
     //进环
     if(ImageFlag.image_element_rings_flag == 5 && ImageStatus.Miss_Right_lines>15)//
     {
@@ -2371,125 +2366,80 @@ void Element_Handle_Left_Rings()
 
     /***************************************处理**************************************/
     //准备进环  半宽处理
-    if (   ImageFlag.image_element_rings_flag == 1
-        || ImageFlag.image_element_rings_flag == 2
-        || ImageFlag.image_element_rings_flag == 3
-        || ImageFlag.image_element_rings_flag == 4)
-    {
-//        for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
-//        {
-//            ImageDeal[Ysite].Center = ImageDeal[Ysite].RightBorder - Half_Road_Wide[Ysite];
-//        }
-        for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
-           {
-            //    int left  = ImageDeal[Ysite].LeftBorder;
-            //    int right = ImageDeal[Ysite].RightBorder;
-            //    int wide  = right - left;
-               int center;
-
-               /* 左环入口：左边线正在消失，优先用右边界 */
-        if (ImageDeal[Ysite].IsRightFind == 'T' &&
-            ImageDeal[Ysite].RightBorder > 2 &&
-            ImageDeal[Ysite].RightBorder < LCDW - 6)
-        {
-            center = ImageDeal[Ysite].RightBorder -
-                     Half_Road_Wide[Ysite];
-        }
-        /* 右边界真的不可信时，才用左边界兜底 */
-        else if (ImageDeal[Ysite].IsLeftFind == 'T' &&
-                 ImageDeal[Ysite].LeftBorder > 2 &&
-                 ImageDeal[Ysite].LeftBorder < LCDW - 6)
-        {
-            center = ImageDeal[Ysite].LeftBorder +
-                     Half_Road_Wide[Ysite];
-        }
-        /* 两边都不可信，保持原值 */
-        else
-        {
-            center = ImageDeal[Ysite].Center;
-        }
-
-               LimitL(center);
-               LimitH(center);
-
-               ImageDeal[Ysite].Center = center;
-           }
-    }
-
-    
-    /* 状态 5、6、7、8：左环环内中线 */
-if (ImageFlag.image_element_rings_flag >= 5 &&
-    ImageFlag.image_element_rings_flag <= 8)
+if (ImageFlag.image_element_rings_flag == 1 ||
+    ImageFlag.image_element_rings_flag == 2 ||
+    ImageFlag.image_element_rings_flag == 3 ||
+    ImageFlag.image_element_rings_flag == 4)
 {
-    const uint8 *ring_half_table;
-    int extra;
-
-    if (ImageFlag.ring_big_small == 1)
+    for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
     {
-        ring_half_table = Half_Ring_Wide_small;
-    }
-    else
-    {
-        ring_half_table = Half_Ring_Wide;
-    }
-
-    /*
-     * 保持原来的状态8逻辑：
-     * 小环状态8额外 +10；
-     * 大环原来的 else 分支没有 +10。
-     */
-    if (ImageFlag.image_element_rings_flag == 8 &&
-        ImageFlag.ring_big_small == 1)
-    {
-        extra = 10;
-    }
-    else
-    {
-        extra = 0;
-    }
-
-    for (int Ysite = 69; Ysite > 20; Ysite--)
-    {
-        int center;
-
-        /* 左环正常锚点：左边界 */
-        if (ImageDeal[Ysite].IsLeftFind == 'T' &&
-            ImageDeal[Ysite].LeftBorder > 2 &&
-            ImageDeal[Ysite].LeftBorder < LCDW - 6)
-        {
-            center = ImageDeal[Ysite].LeftBorder
-                   + ring_half_table[Ysite]
-                   - Small_Rings_HalfWide_Offset
-                   + extra;
-        }
-        /* 左边界失效，用右边界兜底 */
-        else if (ImageDeal[Ysite].IsRightFind == 'T' &&
-                 ImageDeal[Ysite].RightBorder > 2 &&
-                 ImageDeal[Ysite].RightBorder < LCDW - 6)
-        {
-            center = ImageDeal[Ysite].RightBorder
-                   - ring_half_table[Ysite]
-                   - Small_Rings_HalfWide_Offset
-                   + extra;
-        }
-        /* 两侧都不可靠，保持原 Center */
-        else
-        {
-            center = ImageDeal[Ysite].Center;
-        }
-
-        if (center < 0 || center >= LCDW)
-        {
-            ImageDeal[Ysite].Center = -1;
-            continue;
-        }
-
-        LimitL(center);
-        LimitH(center);
-
-        ImageDeal[Ysite].Center = center;
+        ImageDeal[Ysite].Center =
+            ImageDeal[Ysite].RightBorder - Half_Road_Wide[Ysite];
     }
 }
+
+    //进环  半宽处理
+    if  ( ImageFlag.image_element_rings_flag == 5
+        ||ImageFlag.image_element_rings_flag == 6
+        )
+    {
+        if(ImageFlag.ring_big_small==1)
+        {
+            for (int Ysite = 69; Ysite > 20; Ysite--)
+            {
+                    ImageDeal[Ysite].Center = ImageDeal[Ysite].LeftBorder + Half_Ring_Wide_small[Ysite]-Small_Rings_HalfWide_Offset;
+                    LimitL(ImageDeal[Ysite].Center);
+            }
+        }
+        else
+        {
+            for (int Ysite = 69; Ysite > 20; Ysite--)
+            {
+                    ImageDeal[Ysite].Center = ImageDeal[Ysite].LeftBorder + Half_Ring_Wide[Ysite]-Small_Rings_HalfWide_Offset;
+                    LimitL(ImageDeal[Ysite].Center);
+            }
+        }
+    }
+    //环内  半宽处理
+    if (ImageFlag.image_element_rings_flag == 7)
+    {
+        if(ImageFlag.ring_big_small==1)
+        {
+            for (int Ysite = 69; Ysite > 20; Ysite--)
+            {
+                    ImageDeal[Ysite].Center = ImageDeal[Ysite].LeftBorder + Half_Ring_Wide_small[Ysite]-Small_Rings_HalfWide_Offset;
+                    LimitL(ImageDeal[Ysite].Center);
+            }
+        }
+        else
+        {
+            for (int Ysite = 69; Ysite > 20; Ysite--)
+            {
+                    ImageDeal[Ysite].Center = ImageDeal[Ysite].LeftBorder + Half_Ring_Wide[Ysite]-Small_Rings_HalfWide_Offset;
+                    LimitL(ImageDeal[Ysite].Center);
+            }
+        }
+    }
+    //出环 半宽处理
+    if (ImageFlag.image_element_rings_flag == 8)                                      //大圆环
+    {
+        if(ImageFlag.ring_big_small==1)
+        {
+            for (int Ysite = 69; Ysite > 20; Ysite--)
+            {
+                    ImageDeal[Ysite].Center = ImageDeal[Ysite].LeftBorder + Half_Ring_Wide_small[Ysite]-Small_Rings_HalfWide_Offset+10;
+                    LimitL(ImageDeal[Ysite].Center);
+            }
+        }
+        else
+        {
+            for (int Ysite = 69; Ysite > 20; Ysite--)
+            {
+                    ImageDeal[Ysite].Center = ImageDeal[Ysite].LeftBorder + Half_Ring_Wide[Ysite]-Small_Rings_HalfWide_Offset;
+                    LimitL(ImageDeal[Ysite].Center);
+            }
+        }
+    }
     //已出环 半宽处理
     if (ImageFlag.image_element_rings_flag == 9)
     {
@@ -2542,7 +2492,7 @@ void Element_Handle_Right_Rings()
     //大小圆环判断
     if(ImageFlag.image_element_rings_flag == 5)
     {
-        Small_Rings_HalfWide_Offset=25;
+        Small_Rings_HalfWide_Offset=30;
     }
 //    进环
     if(ImageFlag.image_element_rings_flag == 5 && ImageStatus.Miss_Left_lines>15)
@@ -2620,123 +2570,80 @@ void Element_Handle_Right_Rings()
 
     /***************************************处理**************************************/
     //准备进环  半宽处理
-    if (   ImageFlag.image_element_rings_flag == 1
-        || ImageFlag.image_element_rings_flag == 2
-        || ImageFlag.image_element_rings_flag == 3
-        || ImageFlag.image_element_rings_flag == 4)
-    {
-//        for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
-//        {
-//            ImageDeal[Ysite].Center = ImageDeal[Ysite].LeftBorder + Half_Road_Wide[Ysite];
-//        }
-        for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
-            {
-                // int left  = ImageDeal[Ysite].LeftBorder;
-                // int right = ImageDeal[Ysite].RightBorder;
-                // int wide  = right - left;
-                int center;
-
-                /* 右环入口：右边线正在消失，优先用左边界 */
-        if (ImageDeal[Ysite].IsLeftFind == 'T' &&
-            ImageDeal[Ysite].LeftBorder > 2 &&
-            ImageDeal[Ysite].LeftBorder < LCDW - 6)
-        {
-            center = ImageDeal[Ysite].LeftBorder +
-                     Half_Road_Wide[Ysite];
-        }
-        else if (ImageDeal[Ysite].IsRightFind == 'T' &&
-                 ImageDeal[Ysite].RightBorder > 2 &&
-                 ImageDeal[Ysite].RightBorder < LCDW - 6)
-        {
-            center = ImageDeal[Ysite].RightBorder -
-                     Half_Road_Wide[Ysite];
-        }
-        else
-        {
-            center = ImageDeal[Ysite].Center;
-        }
-
-
-                LimitL(center);
-                LimitH(center);
-
-                ImageDeal[Ysite].Center = center;
-            }
-    }
-
-    /* 状态 5、6、7、8：右环环内中线 */
-if (ImageFlag.image_element_rings_flag >= 5 &&
-    ImageFlag.image_element_rings_flag <= 8)
+    if (ImageFlag.image_element_rings_flag == 1 ||
+    ImageFlag.image_element_rings_flag == 2 ||
+    ImageFlag.image_element_rings_flag == 3 ||
+    ImageFlag.image_element_rings_flag == 4)
 {
-    const uint8 *ring_half_table;
-    int extra;
-
-    if (ImageFlag.ring_big_small == 1)
+    for (int Ysite = 59; Ysite > ImageStatus.OFFLine; Ysite--)
     {
-        ring_half_table = Half_Ring_Wide_small;
-    }
-    else
-    {
-        ring_half_table = Half_Ring_Wide;
-    }
-
-    /*
-     * 保持原来的状态8逻辑：
-     * 小环状态8额外 -10；
-     * 大环原来的 else 分支没有 -10。
-     */
-    if (ImageFlag.image_element_rings_flag == 8 &&
-        ImageFlag.ring_big_small == 1)
-    {
-        extra = 10;
-    }
-    else
-    {
-        extra = 0;
-    }
-
-    for (int Ysite = 69; Ysite > 20; Ysite--)
-    {
-        int center;
-
-        /* 右环正常锚点：右边界 */
-        if (ImageDeal[Ysite].IsRightFind == 'T' &&
-            ImageDeal[Ysite].RightBorder > 2 &&
-            ImageDeal[Ysite].RightBorder < LCDW - 6)
-        {
-            center = ImageDeal[Ysite].RightBorder
-                   - ring_half_table[Ysite]
-                   + Small_Rings_HalfWide_Offset
-                   - extra;
-        }
-        /* 右边界失效，用左边界兜底 */
-        else if (ImageDeal[Ysite].IsLeftFind == 'T' &&
-                 ImageDeal[Ysite].LeftBorder > 2 &&
-                 ImageDeal[Ysite].LeftBorder < LCDW - 6)
-        {
-            center = ImageDeal[Ysite].LeftBorder
-                   + ring_half_table[Ysite]
-                   + Small_Rings_HalfWide_Offset
-                   - extra;
-        }
-        /* 两侧都不可靠，保持原 Center */
-        else
-        {
-            center = ImageDeal[Ysite].Center;
-        }
-
-        if (center < 0 || center >= LCDW)
-        {
-            ImageDeal[Ysite].Center = -1;
-            continue;
-        }
-
-        LimitL(center);
-        LimitH(center);
-
-        ImageDeal[Ysite].Center = center;
+        ImageDeal[Ysite].Center =
+            ImageDeal[Ysite].LeftBorder + Half_Road_Wide[Ysite];//右边界失效，左边界+半路宽
     }
 }
+    //进环  半宽处理
+    if (   ImageFlag.image_element_rings_flag == 5//入环
+        || ImageFlag.image_element_rings_flag == 6//入环
+       )
+    {
+        if(ImageFlag.ring_big_small==1)//小环半宽补线
+        {
+            for (int Ysite = 69; Ysite > 20; Ysite--)
+            {
+                    ImageDeal[Ysite].Center = ImageDeal[Ysite].RightBorder - Half_Ring_Wide_small[Ysite]+Small_Rings_HalfWide_Offset;//加5是为了提前入环
+                    LimitH(ImageDeal[Ysite].Center);
+            }
+        }
+        else//右环半宽补线
+        {
+            for (int Ysite = 69; Ysite > 20; Ysite--)
+            {
+                    ImageDeal[Ysite].Center = ImageDeal[Ysite].RightBorder - Half_Ring_Wide[Ysite]+Small_Rings_HalfWide_Offset;
+                    LimitH(ImageDeal[Ysite].Center);
+            }
+        }
+    }
+    //环内  半宽处理
+    if (ImageFlag.image_element_rings_flag == 7)
+    {
+        if(ImageFlag.ring_big_small==1)//小环
+        {
+            for (int Ysite = 69; Ysite > 20; Ysite--)
+            {
+                    ImageDeal[Ysite].Center = ImageDeal[Ysite].RightBorder - Half_Ring_Wide_small[Ysite]+Small_Rings_HalfWide_Offset;
+                    LimitH(ImageDeal[Ysite].Center);
+            }
+        }
+        else//大环
+        {
+            for (int Ysite = 69; Ysite > 20; Ysite--)
+            {
+                    ImageDeal[Ysite].Center = ImageDeal[Ysite].RightBorder - Half_Ring_Wide[Ysite]+Small_Rings_HalfWide_Offset;
+                    LimitH(ImageDeal[Ysite].Center);
+            }
+        }
+    }
+
+    //出环 半宽处理
+    if (ImageFlag.image_element_rings_flag == 8)  //大圆环
+{
+        if(ImageFlag.ring_big_small==1)
+        {
+            for (int Ysite = 69; Ysite > 20; Ysite--)
+            {
+                    ImageDeal[Ysite].Center = ImageDeal[Ysite].RightBorder - Half_Ring_Wide_small[Ysite]+Small_Rings_HalfWide_Offset-10;
+                    LimitH(ImageDeal[Ysite].Center);
+            }
+        }
+        else
+        {
+            for (int Ysite = 69; Ysite > 20; Ysite--)
+            {
+                    ImageDeal[Ysite].Center = ImageDeal[Ysite].RightBorder - Half_Ring_Wide[Ysite]+Small_Rings_HalfWide_Offset;
+                    LimitH(ImageDeal[Ysite].Center);
+            }
+        }
+    }
     //已出环 半宽处理
     if (ImageFlag.image_element_rings_flag == 9)
     {
