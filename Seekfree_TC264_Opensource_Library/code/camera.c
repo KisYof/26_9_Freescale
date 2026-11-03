@@ -213,6 +213,10 @@ static void Camera_ClearRuntimeState(void)
     LineLostCount = 0;
     LineLostFlag = 0;
     VisionStopFlag = 0;
+
+
+    CrossFill_Reset();
+
 }
 
 void Camera_RequestRuntimeReset(void)
@@ -1774,7 +1778,236 @@ void Get_ExtensionLine(void)
 //    BeeOff;
 //    /*****************************************所有的补线处理结束，把中线和赛道宽度信息再更新一遍******************************************************/
 }
+//——————————————————————————————————十字补线锁存状态和函数——————————————————————————————————//
+static uint8 cross_fill_active = 0;
+static uint8 cross_fill_exit_count = 0;
 
+static float cross_left_slope = 0.0f;
+static float cross_left_intercept = 0.0f;
+static float cross_right_slope = 0.0f;
+static float cross_right_intercept = 0.0f;
+
+
+void CrossFill_Reset(void)
+{
+    cross_fill_active = 0;
+    cross_fill_exit_count = 0;
+
+    cross_left_slope = 0.0f;
+    cross_left_intercept = 0.0f;
+    cross_right_slope = 0.0f;
+    cross_right_intercept = 0.0f;
+}
+
+
+static uint8 CrossFill_IsBottomWhite(void)
+{
+    int x;
+    int y;
+    int white_count = 0;
+
+    for (y = LCDH - 5; y < LCDH; y++)
+    {
+        for (x = 0; x < LCDW; x++)
+        {
+            if (Pixle[y][x] == 255)
+            {
+                white_count++;
+            }
+        }
+    }
+
+    if (white_count > (LCDW * 5 * 80 / 100))
+    {
+        return 1;
+    }
+
+    if (ImageDeal[LCDH - 1].IsLeftFind != 'T' &&
+        ImageDeal[LCDH - 1].IsRightFind != 'T')
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+
+static uint8 CrossFill_FitLine(uint8 is_right,
+                               float *slope,
+                               float *intercept)
+{
+    int x;
+    int y;
+    int count = 0;
+
+    double sum_y = 0.0;
+    double sum_x = 0.0;
+    double sum_yy = 0.0;
+    double sum_yx = 0.0;
+
+    double denom;
+
+    /*
+     * 从底部往上，收集最近 12 个左右都有效的行。
+     */
+    for (y = LCDH - 1;
+         y > ImageStatus.OFFLine + 4 && count < 12;
+         y--)
+    {
+        if (ImageDeal[y].IsLeftFind != 'T' ||
+            ImageDeal[y].IsRightFind != 'T')
+        {
+            continue;
+        }
+
+        if (is_right)
+        {
+            x = ImageDeal[y].RightBorder;
+        }
+        else
+        {
+            x = ImageDeal[y].LeftBorder;
+        }
+
+        if (x <= 2 || x >= LCDW - 2)
+        {
+            continue;
+        }
+
+        sum_y  += y;
+        sum_x  += x;
+        sum_yy += (double)y * y;
+        sum_yx += (double)y * x;
+        count++;
+    }
+
+    if (count < 6)
+    {
+        return 0;
+    }
+
+    denom = (double)count * sum_yy - sum_y * sum_y;
+
+    if (fabs(denom) < 0.001)
+    {
+        return 0;
+    }
+
+    *slope = (float)(((double)count * sum_yx -
+                      sum_y * sum_x) / denom);
+
+    *intercept = (float)((sum_x - (*slope) * sum_y) / count);
+
+    if (fabs(*slope) > 6.0f)
+    {
+        return 0;
+    }
+
+    return 1;
+}
+
+
+static void CrossFill_Apply(void)
+{
+    int y;
+    int left;
+    int right;
+    int new_left;
+    int new_right;
+
+    for (y = LCDH - 1;
+         y > ImageStatus.OFFLine + 4;
+         y--)
+    {
+        left = ImageDeal[y].LeftBorder;
+        right = ImageDeal[y].RightBorder;
+
+        if (ImageDeal[y].IsLeftFind != 'T' ||
+            left <= 2 || left >= LCDW - 2)
+        {
+            new_left = (int)(cross_left_slope * y +
+                             cross_left_intercept);
+
+            if (new_left > 2 && new_left < LCDW - 2)
+            {
+                ImageDeal[y].LeftBorder = new_left;
+                ImageDeal[y].IsLeftFind = 'T';
+            }
+        }
+
+        if (ImageDeal[y].IsRightFind != 'T' ||
+            right <= 2 || right >= LCDW - 2)
+        {
+            new_right = (int)(cross_right_slope * y +
+                              cross_right_intercept);
+
+            if (new_right > 2 && new_right < LCDW - 2)
+            {
+                ImageDeal[y].RightBorder = new_right;
+                ImageDeal[y].IsRightFind = 'T';
+            }
+        }
+
+        if (ImageDeal[y].IsLeftFind == 'T' &&
+            ImageDeal[y].IsRightFind == 'T')
+        {
+            ImageDeal[y].Center =
+                (ImageDeal[y].LeftBorder +
+                 ImageDeal[y].RightBorder) / 2;
+
+            ImageDeal[y].Wide =
+                ImageDeal[y].RightBorder -
+                ImageDeal[y].LeftBorder;
+        }
+    }
+}
+
+
+void CrossFill_Latched(void)
+{
+    if (!cross_fill_active)
+    {
+        /*
+         * 十字第一次触发时，只在底部开始变白时
+         * 锁存一次左右边线模型。
+         */
+        if (ImageFlag.Cross_Flag == 1 &&
+            CrossFill_IsBottomWhite())
+        {
+            if (CrossFill_FitLine(0,
+                                  &cross_left_slope,
+                                  &cross_left_intercept) &&
+                CrossFill_FitLine(1,
+                                  &cross_right_slope,
+                                  &cross_right_intercept))
+            {
+                cross_fill_active = 1;
+                cross_fill_exit_count = 0;
+            }
+        }
+
+        return;
+    }
+
+    /* 锁存期间只使用保存的左右边线模型延长 */
+    CrossFill_Apply();
+
+    /* 底部重新出现有效赛道后，退出锁存状态 */
+    if (!CrossFill_IsBottomWhite())
+    {
+        cross_fill_exit_count++;
+
+        if (cross_fill_exit_count >= 2)
+        {
+            CrossFill_Reset();
+        }
+    }
+    else
+    {
+        cross_fill_exit_count = 0;
+    }
+}
+//————————————————————————————————————————————————————————————————————————————————————
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
 //  @name           Straight_Judge
 //  @brief          *****************直线判断******************
@@ -2111,9 +2344,13 @@ void Element_Judgement_Cross()
 
 }
 //十字补线函数 根据十字之前的左右边线 用已经知道的斜率延长出丢失的边线 重新生成十字区域的中线
+// void Element_Handle_Cross()
+// {
+//     Get_ExtensionLine();
+// }
 void Element_Handle_Cross()
 {
-    Get_ExtensionLine();
+    CrossFill_Latched();
 }
 
 //--------------------------------------------------------------
@@ -2977,9 +3214,13 @@ void Element_Handle()
 
 
     if(ImageFlag.Cross_Flag==1)
-    {
-        Element_Handle_Cross();
-    }
+{
+    Element_Handle_Cross();
+}
+else
+{
+    CrossFill_Reset();
+}
     Protect_Without_Road(LCDH-6,LCDH-1,5,LCDW-6);
 
 }

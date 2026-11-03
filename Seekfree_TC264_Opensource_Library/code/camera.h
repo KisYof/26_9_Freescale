@@ -165,6 +165,7 @@ void Get_AllLine(void);
 void Get_ExtensionLine(void);
 void Flag_init(void);
 void Data_init(void);
+void CrossFill_Reset(void);
 extern uint8 get_Threshold(uint8* image[][LCDW],uint16 col, uint16 row);
 extern uint32 break_road(uint8 line_start);
 
