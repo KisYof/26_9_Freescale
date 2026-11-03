@@ -167,13 +167,13 @@ uint8 Half_Ring_Wide_small[LCDH]=
 //建立元素前瞻行参数表
 static const uint8 Vision_ProspectRow[VP_COUNT] =
 {
-    30,     // 普通赛道：看远一点
-    32,     // 十字：看中间
-    30,     // 斑马线
-    35,     // 圆环入口：看近一点
-    42,     // 圆环内部
-    45,     // 大圆环内部
-    28      // 圆环出口
+    35,     // 普通赛道
+    37,     // 十字：看中间
+    35,     // 斑马线
+    30,     // 圆环入口
+    47,     // 圆环内部
+    50,     // 大圆环内部
+    30      // 圆环出口
 };
 
 uint8 ControlProspectType = VP_NORMAL;
@@ -2366,17 +2366,52 @@ void Element_Handle_Left_Rings()
 
     /***************************************处理**************************************/
     //准备进环  半宽处理
-if (ImageFlag.image_element_rings_flag == 1 ||
-    ImageFlag.image_element_rings_flag == 2 ||
-    ImageFlag.image_element_rings_flag == 3 ||
-    ImageFlag.image_element_rings_flag == 4)
-{
-    for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
+    if (   ImageFlag.image_element_rings_flag == 1
+        || ImageFlag.image_element_rings_flag == 2
+        || ImageFlag.image_element_rings_flag == 3
+        || ImageFlag.image_element_rings_flag == 4)
     {
-        ImageDeal[Ysite].Center =
-            ImageDeal[Ysite].RightBorder - Half_Road_Wide[Ysite];
+//        for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
+//        {
+//            ImageDeal[Ysite].Center = ImageDeal[Ysite].RightBorder - Half_Road_Wide[Ysite];
+//        }
+        for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
+           {
+               int left  = ImageDeal[Ysite].LeftBorder;
+               int right = ImageDeal[Ysite].RightBorder;
+               int wide  = right - left;
+               int center;
+
+               /* 左右边界都有效，先用正常中线 */
+               if (left > 2 &&
+                   right < LCDW - 2 &&
+                   wide >= 20 &&
+                   wide <= 140)
+               {
+                   center = (left + right) / 2;
+               }
+               /* 只剩右边线，用右边界往左推 */
+               else if (right > 2 && right < LCDW - 2)
+               {
+                   center = right - Half_Road_Wide[Ysite];
+               }
+               /* 只剩左边线，用左边界往右推 */
+               else if (left > 2 && left < LCDW - 2)
+               {
+                   center = left + Half_Road_Wide[Ysite];
+               }
+               /* 两边都不好，保持上一行中点 */
+               else
+               {
+                   center = ImageDeal[Ysite].Center;
+               }
+
+               LimitL(center);
+               LimitH(center);
+
+               ImageDeal[Ysite].Center = center;
+           }
     }
-}
 
     //进环  半宽处理
     if  ( ImageFlag.image_element_rings_flag == 5
@@ -2570,17 +2605,53 @@ void Element_Handle_Right_Rings()
 
     /***************************************处理**************************************/
     //准备进环  半宽处理
-    if (ImageFlag.image_element_rings_flag == 1 ||
-    ImageFlag.image_element_rings_flag == 2 ||
-    ImageFlag.image_element_rings_flag == 3 ||
-    ImageFlag.image_element_rings_flag == 4)
-{
-    for (int Ysite = 59; Ysite > ImageStatus.OFFLine; Ysite--)
+    if (   ImageFlag.image_element_rings_flag == 1
+        || ImageFlag.image_element_rings_flag == 2
+        || ImageFlag.image_element_rings_flag == 3
+        || ImageFlag.image_element_rings_flag == 4)
     {
-        ImageDeal[Ysite].Center =
-            ImageDeal[Ysite].LeftBorder + Half_Road_Wide[Ysite];//右边界失效，左边界+半路宽
+//        for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
+//        {
+//            ImageDeal[Ysite].Center = ImageDeal[Ysite].LeftBorder + Half_Road_Wide[Ysite];
+//        }
+        for (int Ysite = 69; Ysite > ImageStatus.OFFLine; Ysite--)
+            {
+                int left  = ImageDeal[Ysite].LeftBorder;
+                int right = ImageDeal[Ysite].RightBorder;
+                int wide  = right - left;
+                int center;
+
+                /* 两边都有效时，先使用正常左右边界中线 */
+                if (left > 2 &&
+                    right < LCDW - 2 &&
+                    wide >= 20 &&
+                    wide <= 140)
+                {
+                    center = (left + right) / 2;
+                }
+                /* 只剩右边线，说明左边丢失，用右边界往左推 */
+                else if (right > 2 && right < LCDW - 2)
+                {
+                    center = right - Half_Road_Wide[Ysite];
+                }
+                /* 只剩左边线，用左边界往右推 */
+                else if (left > 2 && left < LCDW - 2)
+                {
+                    center = left + Half_Road_Wide[Ysite];
+                }
+                /* 两边都不可靠，保持上一帧中点 */
+                else
+                {
+                    center = ImageDeal[Ysite].Center;
+                }
+
+                LimitL(center);
+                LimitH(center);
+
+                ImageDeal[Ysite].Center = center;
+            }
     }
-}
+
     //进环  半宽处理
     if (   ImageFlag.image_element_rings_flag == 5//入环
         || ImageFlag.image_element_rings_flag == 6//入环
