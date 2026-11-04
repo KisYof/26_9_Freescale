@@ -18,28 +18,28 @@
 #define RUN_STALL_CONFIRM_TICKS (150U) // 速度任务计数：堵转条件连续成立 300ms 才确认
 #define RUN_STALL_TARGET_MIN (20)      // 目标速度大于 20cm/s 才谈堵转
 #define RUN_STALL_SPEED_MAX (5)        // 实际速度绝对值小于 5cm/s 视为停转
-#define RUN_SPEED_ACCEL_STEP (8)       // 10ms 加速步长，保守初值，需实车标定
+#define RUN_SPEED_ACCEL_STEP (3)       // 10ms 加速步长，保守初值，需实车标定
 #define RUN_SPEED_DECEL_STEP (10)       // 10ms 减速步长，必须大于加速步长，需实车标定
 #define SPEED_MID (220)                // 调试层默认目标速度
-#define STEER_OUTPUT_MAP_SCALE (0.20)  // 转向输出换算成舵机角的缩放系数
+#define STEER_OUTPUT_MAP_SCALE (0.25)  // 转向输出换算成舵机角的缩放系数
 
 // 原版回退参数（新版普通赛道使用下方标定表）：Track_Slope_x1000 是弯道趋势而非严格几何曲率，以下参数均需实车标定。
 #define RUN_STRAIGHT_SLOPE_THRESHOLD (120) // 新版 <=120；回退模式 <120 且 straight_long 有效
 #define RUN_CURVE_SLOPE_LOW (150)          // 轻弯起点 S1
 #define RUN_CURVE_SLOPE_MID (500)          // 中弯分段点 S2
 #define RUN_CURVE_SLOPE_HIGH (1000)        // 急弯分段点 S3
-#define RUN_SPEED_CURVE_MILD (200)         // 未确认长直道/中等弯道的速度上限
-#define RUN_SPEED_CURVE_MIN (180)          // 急弯最低速度上限
-#define RUN_SPEED_UNKNOWN_LIMIT (180)      // slope 无效时的保守速度上限
-#define RUN_SPEED_CROSS_LIMIT (200)        // 十字速度上限
+#define RUN_SPEED_CURVE_MILD (220)         // 未确认长直道/中等弯道的速度上限
+#define RUN_SPEED_CURVE_MIN (170)          // 急弯最低速度上限
+#define RUN_SPEED_UNKNOWN_LIMIT (150)      // slope 无效时的保守速度上限
+#define RUN_SPEED_CROSS_LIMIT (180)        // 十字速度上限
 #define RUN_SPEED_RING_LIMIT (180)         // 环岛速度上限
-#define RUN_SPEED_LINE_LOST_LIMIT (160)    // 丢线时的安全速度上限
+#define RUN_SPEED_LINE_LOST_LIMIT (120)    // 丢线时的安全速度上限
 
 #if RUN_SPEED_PLANNER_ENABLE
-#define RUN_STRAIGHT_CONFIRM_FRAMES (6U)   // 至少六个有效新帧，不按调度次数累计
-#define RUN_STRAIGHT_REVOKE_SLOPE (200)
+#define RUN_STRAIGHT_CONFIRM_FRAMES (8U)   // 至少八个有效新帧，不按调度次数累计
+#define RUN_STRAIGHT_REVOKE_SLOPE (120)
 #define RUN_STRAIGHT_MID_CONFIRM (10)
-#define RUN_STRAIGHT_MID_REVOKE (18)
+#define RUN_STRAIGHT_MID_REVOKE (10)
 #define RUN_SPEED_UNCONFIRMED_LIMIT (185)
 #else
 #define RUN_STRAIGHT_CONFIRM_FRAMES (4U)   // 原版回退参数
@@ -141,13 +141,13 @@ static void run_update_speed_ramp(int16 target_speed);
 static void run_init_fuzzy_direction(void)
 {
     static const double error_points[FUZZY_PID_LEVEL_COUNT] =
-        {-70.0, -45.0, -20.0, 0.0, 20.0, 45.0, 70.0};
+        {-60.0, -35.0, -17.0, 0.0, 17.0, 35.0, 60.0};
     static const double delta_points[FUZZY_PID_LEVEL_COUNT] =
         {-16.0, -9.0, -4.0, 0.0, 4.0, 9.0, 16.0};
     static const double kp_offsets[FUZZY_PID_LEVEL_COUNT] =
-        {-0.3, -0.2, -0.15, 0.0, 0.15, 0.2, 0.3};
+        {-0.35, -0.25, -0.13, 0.0, 0.13, 0.25, 0.35};
     static const double kd_offsets[FUZZY_PID_LEVEL_COUNT] =
-        {-0.15, -0.12, -0.05, 0.0, 0.05, 0.12, 0.18};
+        {-0.15, -0.08, -0.03, 0.0, 0.03, 0.08, 0.15};
     static const unsigned char kp_rules[7][7] = {
         {6, 5, 5, 5, 4, 4, 3},   // NB 行右侧 +1
         {5, 5, 4, 4, 3, 3, 2},
@@ -186,10 +186,10 @@ static void run_init_fuzzy_direction(void)
             config.kd_rules[row][column] = kd_rules[row][column];
         }
     }
-    config.kp_min = 0.85;
+    config.kp_min = 0.65;
     config.kp_max = 1.65;
     config.ki_min = config.ki_max = 0.0;
-    config.kd_min = 0.12;
+    config.kd_min = 0.02;
     config.kd_max = 0.60;
     config.delta_error_limit = 16.0;
     config.integral_min = config.integral_max = 0.0;
@@ -270,10 +270,10 @@ void run_init(void)
     hardware_init();
     memset(&run_imu_monitor, 0, sizeof(run_imu_monitor));
     run_imu_age_ms = 65535U;
-    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 10.3, 0.02, 0.0, 3500, -3500, 0, 0);
-    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 10.3, 0.02, 0.0, 3500, -3500, 0, 0);
+    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 13.3, 0.05, 0.0, 4000, -4000, 0, 0);
+    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 13.3, 0.035, 0.0, 4000, -4000, 0, 0);
 #if RUN_STEER_FUZZY_ENABLE
-    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 0.9, 0.0, 0.18, 90, -90, 0, 0);
+    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 0.80, 0.0, 0.22, 100, -100, 0, 0);
     run_init_fuzzy_direction();
 #else
     PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.4, 0.0, 0.5, 90, -90, 0, 0);
@@ -529,7 +529,7 @@ static void run_update_direction(void)
     if (run_vision.mid_valid && !run_vision.line_lost)
         run_held_mid_error = run_vision.mid_error;
 
-    filtered_mid_error = filter_rc_low_pass(&steer_input_filter, (float)run_held_mid_error, 0.4);
+    filtered_mid_error = filter_rc_low_pass(&steer_input_filter, (float)run_held_mid_error, 0.6);
 #if RUN_STEER_FUZZY_ENABLE
     // 调参仍写原 pid_gap 的 Kp/Kd；下一次 10ms 周期使用新基准值，Ki 永久为零。
     pid_gap.controller.pos.Ki = 0.0;
@@ -657,21 +657,28 @@ static int16 run_speed_limit_lerp(int16 value, int16 input_low, int16 input_high
 }
 
 // 普通赛道：风险滤波后连续单调映射，未确认直道限制在 185。
-// straight_long 保留作观测参考；普通直道由倾斜和中线偏差连续六帧确认。
+// straight_long 保留作观测参考；普通直道由倾斜和中线偏差连续八帧确认。
 static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 user_limit)
 {
 #if RUN_SPEED_PLANNER_ENABLE
-    // 初始提速标定点，不代表物理安全极限；所有插值乘积使用 int32。
-    static const int16 slope_points[] = {0, 120, 150, 300, 500, 800, 1100, 1400};
-    static const int16 speed_points[] = {200, 200, 195, 185, 175, 170, 165, 160};
-    int16 limit = RUN_SPEED_CURVE_MIN;
+    // 连续弯道试验标定：风险增加只能降低限速；表尾以上保持最后一档。
+    static const int16 slope_points[] = {0, 120, 150, 300, 500, 800, 1100};
+    static const int16 speed_points[] = {185, 185, 180, 175, 170, 160, 150};
+    int16 limit = speed_points[sizeof(speed_points) / sizeof(speed_points[0]) - 1U];
     int16 slope = run_curve_risk;
     uint8 point;
 
-    // 特殊元素/失效状态不使用新的普通赛道映射；冻结 risk 后仍采用原保守上限。
-    if (!vision->track_slope_valid || !vision->mid_valid || vision->line_lost
-        || vision->cross || vision->ring_active || vision->zebra)
-        return (user_limit < RUN_SPEED_UNKNOWN_LIMIT) ? user_limit : RUN_SPEED_UNKNOWN_LIMIT;
+    // 失效不能恢复速度：结合上次最终规划上限，丢线额外由安全限速压低。
+    if (!vision->track_slope_valid || !vision->mid_valid || vision->line_lost)
+    {
+        limit = RUN_SPEED_UNKNOWN_LIMIT;
+        if (run_planned_speed > 0 && run_planned_speed < limit)
+            limit = run_planned_speed;
+        return (user_limit < limit) ? user_limit : limit;
+    }
+    // 有效特殊元素不套用普通中线斜率；由独立元素限速约束，不能申请高速。
+    if (vision->cross || vision->ring_active || vision->zebra)
+        return (user_limit < RUN_SPEED_UNCONFIRMED_LIMIT) ? user_limit : RUN_SPEED_UNCONFIRMED_LIMIT;
 
     for (point = 1; point < (uint8)(sizeof(slope_points) / sizeof(slope_points[0])); point++)
     {
@@ -776,7 +783,7 @@ static int16 run_speed_planner(const run_vision_struct *vision)
         || vision->stop || vision->vision_stop || run_status.fault
         || RUN_STATE_RUNNING != run_status.state
         || run_vision_ticks >= RUN_VISION_TIMEOUT_TICKS
-        || slope >= RUN_STRAIGHT_REVOKE_SLOPE
+        || slope > RUN_STRAIGHT_REVOKE_SLOPE
         || vision->mid_error > RUN_STRAIGHT_MID_REVOKE
         || vision->mid_error < -RUN_STRAIGHT_MID_REVOKE)
     {

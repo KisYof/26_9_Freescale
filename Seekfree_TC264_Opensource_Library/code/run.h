@@ -17,9 +17,15 @@
 #define RUN_STEER_FUZZY_DEBUG_ENABLE (1)
 #endif
 
+// 1: 弯道调试优先；保留双轮和方向 E/EC/u，9=有符号斜率x1000，12=斜率有效，13=弯道限速。
+// 仅切换遥测通道，不改变速度规划、PID 或车辆控制；0 恢复下方原观测模式。
+#ifndef RUN_CURVE_DEBUG_ENABLE
+#define RUN_CURVE_DEBUG_ENABLE (1)
+#endif
+
 // 1: 新速度规划；0: 原版速度映射/直道许可。安全修复始终保留。
 #ifndef RUN_SPEED_PLANNER_ENABLE
-#define RUN_SPEED_PLANNER_ENABLE (0)
+#define RUN_SPEED_PLANNER_ENABLE (1)
 #endif
 
 // 0: 保留原示波器通道；1: 速度规划观测，优先于模糊 PD 调试模式。

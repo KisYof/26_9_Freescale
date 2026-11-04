@@ -448,7 +448,16 @@ static void wifi_pid_oscilloscope_send(void)
     wifi_pid_oscilloscope_buffer[14] = (float)track_element_state;
     wifi_pid_oscilloscope_buffer[15] = (float)debug_monitor.line_lost;
 
-#if RUN_SPEED_PLANNER_DEBUG_ENABLE
+#if RUN_CURVE_DEBUG_ENABLE
+    // 斜率是图像中线倾斜代理，不是具有物理单位的几何曲率。
+    // 9/12 沿用上方原始斜率与有效标志；保留 0~5 双轮通道用于排查外力干预。
+#if RUN_STEER_FUZZY_ENABLE
+    wifi_pid_oscilloscope_buffer[6] = (float)debug_monitor.fuzzy_error;
+    wifi_pid_oscilloscope_buffer[7] = (float)debug_monitor.fuzzy_delta;
+    wifi_pid_oscilloscope_buffer[8] = (float)debug_monitor.fuzzy_output;
+#endif
+    wifi_pid_oscilloscope_buffer[13] = (float)debug_monitor.curve_speed_limit;
+#elif RUN_SPEED_PLANNER_DEBUG_ENABLE
     // V2 仍为 16 通道：保留双轮 target/actual/PWM、gap、原始 slope、计划和斜坡速度。
     // 编译期切换后须在会话元数据标明：6=risk, 7=curve limit, 13=straight confirmed。
     wifi_pid_oscilloscope_buffer[6] = (float)debug_monitor.curve_risk;
