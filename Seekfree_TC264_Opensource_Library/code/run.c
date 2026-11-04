@@ -145,9 +145,9 @@ static void run_init_fuzzy_direction(void)
     static const double delta_points[FUZZY_PID_LEVEL_COUNT] =
         {-16.0, -9.0, -4.0, 0.0, 4.0, 9.0, 16.0};
     static const double kp_offsets[FUZZY_PID_LEVEL_COUNT] =
-        {-0.35, -0.25, -0.12, 0.0, 0.12, 0.25, 0.35};
+        {-0.3, -0.2, -0.15, 0.0, 0.15, 0.2, 0.3};
     static const double kd_offsets[FUZZY_PID_LEVEL_COUNT] =
-        {-0.18, -0.12, -0.08, 0.0, 0.08, 0.12, 0.18};
+        {-0.15, -0.12, -0.05, 0.0, 0.05, 0.12, 0.18};
     static const unsigned char kp_rules[7][7] = {
         {6, 5, 5, 5, 4, 4, 3},   // NB 行右侧 +1
         {5, 5, 4, 4, 3, 3, 2},
@@ -270,10 +270,10 @@ void run_init(void)
     hardware_init();
     memset(&run_imu_monitor, 0, sizeof(run_imu_monitor));
     run_imu_age_ms = 65535U;
-    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 2.3, 0.015, 0.0, 3500, -3500, 0, 0);
-    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 2.3, 0.015, 0.0, 3500, -3500, 0, 0);
+    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 10.3, 0.02, 0.0, 3500, -3500, 0, 0);
+    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 10.3, 0.02, 0.0, 3500, -3500, 0, 0);
 #if RUN_STEER_FUZZY_ENABLE
-    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.25, 0.0, 0.36, 90, -90, 0, 0);
+    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 0.9, 0.0, 0.18, 90, -90, 0, 0);
     run_init_fuzzy_direction();
 #else
     PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.4, 0.0, 0.5, 90, -90, 0, 0);
