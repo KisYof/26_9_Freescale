@@ -75,10 +75,8 @@ uint8 ExtenLFlag = 0;                                           //左边线是否需要
 uint8 ExtenRFlag = 0;                                           //右边线是否需要补线的标志变量（十字）
 int left_difference_num;                                        //十字左边线与标准中线39作差的和（40-20行）
 int right_difference_num;                                       //十字右边线与标准中线39作差的和（40-20行）
-int Cross_Corner_L=0;                                           //十字左下角点所在行，列由LeftBorder取得
-int Cross_Corner_R=0;                                           //十字右下角点所在行，列由RightBorder取得
-static uint8 Cross_Corner_L_Valid = 0;                          //当前帧是否找到左下角点候选
-static uint8 Cross_Corner_R_Valid = 0;                          //当前帧是否找到右下角点候选
+int Cross_Corner_L=0;                                           //十字右底部的拐点
+int Cross_Corner_R=0;                                           //十字左底部的拐点
 static int TFSite = 0,left_FTSite = 0,right_FTSite = 0;         //补线计算斜率的时候需要用的存放行的变量
 static float DetR = 0, DetL = 0;                                //存放补线斜率的变量
 //uint8 ExterMidFlag = 0;
@@ -169,8 +167,8 @@ uint8 Half_Ring_Wide_small[LCDH]=
 //建立元素前瞻行参数表
 static const uint8 Vision_ProspectRow[VP_COUNT] =
 {
-    35,     // 普通赛道
-    37,     // 十字：看中间
+    28,     // 普通赛道
+    35,     // 十字：看中间
     35,     // 斑马线
     30,     // 圆环入口
     47,     // 圆环内部
@@ -215,10 +213,6 @@ static void Camera_ClearRuntimeState(void)
     LineLostCount = 0;
     LineLostFlag = 0;
     VisionStopFlag = 0;
-
-
-    CrossPath_Reset();
-
 }
 
 void Camera_RequestRuntimeReset(void)
@@ -686,11 +680,6 @@ void Get_AllLine(void)
   int ytemp_W_L;                                                         //记住首次左丢边行
   int ytemp_W_R;                                                         //记住首次右丢边行
 //  ExterMidFlag = 0;                                                    //midblack重定义的标志位
-  /* 角点只属于当前帧，每帧重新识别，不能沿用旧坐标。 */
-  Cross_Corner_L=0;
-  Cross_Corner_R=0;
-  Cross_Corner_L_Valid=0;
-  Cross_Corner_R_Valid=0;
   ExterMid_Row=0;                                                        //midblack重定义的行数
   ExterMid_Det=0;                                                        //midblack底边几行计算出来的斜率
   ExterMid_num=0;                                                        //记录midblack判断次数
@@ -837,7 +826,6 @@ void Get_AllLine(void)
             {
                 ytemp_W_R_Border=ImageDeal[ysite+1].RightBorder;                //拐点横坐标
                 ytemp_W_R=ysite+1;                                              //拐点纵坐标
-                Cross_Corner_R_Valid=1;                                        //本帧确实找到向内突出的角点
                 break;
             }
         }
@@ -852,7 +840,7 @@ void Get_AllLine(void)
 
 //        if(Continue_R_flag)
 //        {
-            for (ysite = ytemp_W_R + 1; ysite < ytemp_W_R + 15 && ysite < LCDH; ysite++)
+            for (ysite = ytemp_W_R + 1; ysite < ytemp_W_R + 15; ysite++)
             {//zwf
               if(ysite==LCDH)continue;  //为啥不直接break                                            //加到80时，超过数组大小，进入下次循环
               if (ImageDeal[ysite].IsRightFind =='T')
@@ -862,7 +850,7 @@ void Get_AllLine(void)
             }
 //        }
 
-        if (R_found_point >8 && ytemp_W_R + R_found_point < LCDH && ytemp_W_R + 3 < LCDH)                                                   //限制车不在太近或者太远进行斜率计算，适合得位置进行计算/zwf
+        if (R_found_point >8)                                                   //限制车不在太近或者太远进行斜率计算，适合得位置进行计算/zwf
         {
           D_R = ((float)(ImageDeal[ytemp_W_R + R_found_point].RightBorder - ImageDeal[ytemp_W_R + 3].RightBorder)) /((float)(R_found_point - 3));//记录在Ysite+2位置，所以这里是3？
           if (D_R > 0/*&&Straight_Judge(2,ytemp_W_R,ytemp_W_R+8)<3*/)
@@ -921,7 +909,6 @@ void Get_AllLine(void)
             {
                 ytemp_W_L_Border=ImageDeal[ysite+1].LeftBorder; //拐点横坐标
                 ytemp_W_L=ysite+1;                              //拐点纵坐标
-                Cross_Corner_L_Valid=1;                        //本帧确实找到向内突出的角点
                 break;
             }
         }
@@ -935,7 +922,7 @@ void Get_AllLine(void)
 
 //        if(Continue_L_flag)
 //        {
-            for (ysite = ytemp_W_L + 1; ysite < ytemp_W_L + 15 && ysite < LCDH; ysite++)
+            for (ysite = ytemp_W_L + 1; ysite < ytemp_W_L + 15; ysite++)
             {
     //          if(ysite>79)break;
               if(ysite==LCDH)continue;
@@ -946,7 +933,7 @@ void Get_AllLine(void)
             }
 //        }
 
-        if (L_found_point > 8 && ytemp_W_L + L_found_point < LCDH && ytemp_W_L + 3 < LCDH)                                  //找到基准斜率边  做延长线重新确定无边
+        if (L_found_point > 8)                                  //找到基准斜率边  做延长线重新确定无边
         {
           D_L = ((float)(ImageDeal[ytemp_W_L + 3].LeftBorder -ImageDeal[ytemp_W_L + L_found_point].LeftBorder)) /((float)(L_found_point - 3));
           if (D_L > 0/*&&Straight_Judge(1,ytemp_W_R,ytemp_W_R+8)<3*/)
@@ -1072,7 +1059,6 @@ void Flag_init(void)
     ImageFlag.straight_long = 0;
     ImageFlag.ring_big_small = 0;
     ImageFlag.Stop=0;
-    CrossPath_Reset();
 //    ImageFlag.LongestLine_Found_flag=0;
 }
 
@@ -1788,734 +1774,7 @@ void Get_ExtensionLine(void)
 //    BeeOff;
 //    /*****************************************所有的补线处理结束，把中线和赛道宽度信息再更新一遍******************************************************/
 }
-//——————————————————————————————————十字当前帧通道与中线计算——————————————————————————————————//
-#define CROSS_PATH_CORNER_RADIUS    (LCDH / 20)             //角点局部检查半径
-#define CROSS_PATH_UPPER_START      (LCDH / 10)             //上角点搜索起始行
-#define CROSS_PATH_UPPER_END        (LCDH * 3 / 5)           //上角点搜索结束行
-#define CROSS_PATH_CORNER_MARGIN    (LCDW / 20)             //图像边缘角点排除范围
-#define CROSS_PATH_UPPER_GAP        (LCDH / 7)              //上方双角点允许的行差
-#define CROSS_PATH_LOWER_GAP        (LCDH / 4)              //下方双角点允许的行差
 
-int Cross_Upper_Corner_L = 0;                               //左上角点所在行
-int Cross_Upper_Corner_L_X = 0;                             //左上角点所在列
-int Cross_Upper_Corner_R = 0;                               //右上角点所在行
-int Cross_Upper_Corner_R_X = 0;                             //右上角点所在列
-uint8 Cross_Upper_Corner_L_Valid = 0;                       //本帧左上角点有效标志
-uint8 Cross_Upper_Corner_R_Valid = 0;                       //本帧右上角点有效标志
-int CrossMidLine[LCDH];                                    //当前帧白通道生成的中线
-int CrossLeftLine[LCDH];                                   //十字虚拟左边界
-int CrossRightLine[LCDH];                                  //十字虚拟右边界
-
-static uint8 cross_upper_pair_valid = 0;
-static uint8 cross_lower_pair_valid = 0;
-
-static uint8 CrossPath_IsDetected(uint8 is_right, int y)
-{
-    int x;
-    int p;
-    if (y <= ImageStatus.OFFLine || y < 1 || y >= LCDH - 1)
-    {
-        return 0;
-    }
-    if ((is_right ? ImageDeal[y].IsRightFind : ImageDeal[y].IsLeftFind) != 'T')
-    {
-        return 0;
-    }
-    x = is_right ? ImageDeal[y].RightBorder : ImageDeal[y].LeftBorder;
-    if (x <= 2 || x >= LCDW - 3)
-    {
-        return 0;
-    }
-    for (p = x - 1; p <= x + 1; p++)
-    {
-        if (is_right)
-        {
-            if (Pixle[y][p - 1] == 255 && Pixle[y][p] == 255 && Pixle[y][p + 1] == 0)
-            {
-                return 1;
-            }
-        }
-        else if (Pixle[y][p + 1] == 255 && Pixle[y][p] == 255 && Pixle[y][p - 1] == 0)
-        {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static uint8 CrossPath_IsCornerValid(uint8 is_right, int y)
-{
-    if (y < LCDH * 2 / 5 || y <= ImageStatus.OFFLine + 1 || y >= LCDH - 3)
-    {
-        return 0;
-    }
-    return CrossPath_IsDetected(is_right, y) && CrossPath_IsDetected(is_right, y + 1);
-}
-
-/* 上角点黑色区域在左上或右上，其余方向以白色为主，并检查边界连续性。 */
-static int CrossPath_UpperScore(int x, int y, uint8 is_right)
-{
-    int r = CROSS_PATH_CORNER_RADIUS;
-    int side = is_right ? 1 : -1;
-    int dx;
-    int dy;
-    int black = 0;
-    int other = 0;
-    int count;
-    int far_x = x + side * (LCDW / 10);
-    int far_y = y - LCDH / 6;
-    uint8 support = 0;
-    if (r < 2 || x < 2 * r || x >= LCDW - 2 * r || y < 2 * r || y >= LCDH - 2 * r)
-    {
-        return 0;
-    }
-    if (Pixle[y - r][x + side * r] != 0 || Pixle[y + r][x + side * r] != 255 ||
-        Pixle[y - r][x - side * r] != 255 || Pixle[y + r][x - side * r] != 255 ||
-        Pixle[y - 2 * r][x + side * r] != 0 || Pixle[y - r][x + side * 2 * r] != 0)
-    {
-        return 0;
-    }
-    /* 黑色边界还要向外或向上延伸，排除只有局部小黑斑的孤立角点。 */
-    if (far_x >= 1 && far_x < LCDW - 1 && Pixle[y - r][far_x] == 0)
-    {
-        support = 1;
-    }
-    if (far_y >= 1 && Pixle[far_y][x + side * r] == 0)
-    {
-        support = 1;
-    }
-    if (!support)
-    {
-        return 0;
-    }
-    for (dy = -1; dy <= 1; dy += 2)
-    {
-        for (dx = -1; dx <= 1; dx += 2)
-        {
-            int xx;
-            int yy;
-            count = 0;
-            for (yy = 1; yy <= r; yy++)
-            {
-                for (xx = 1; xx <= r; xx++)
-                {
-                    if (Pixle[y + dy * yy][x + dx * xx] == 0)
-                    {
-                        count++;
-                    }
-                }
-            }
-            if (dy == -1 && dx == side)
-            {
-                black = count;
-            }
-            else
-            {
-                if (count * 3 > r * r)
-                {
-                    return 0;
-                }
-                other += count;
-            }
-        }
-    }
-    if (black * 3 < r * r * 2)
-    {
-        return 0;
-    }
-    return black * 3 - other;
-}
-
-static void CrossPath_FindUpperCorners(void)
-{
-    static int left_x[LCDH];
-    static int right_x[LCDH];
-    static int left_score[LCDH];
-    static int right_score[LCDH];
-    int x;
-    int y;
-    int yy;
-    int score;
-    int best = 0;
-    int best_left = 0;
-    int best_right = 0;
-    int gap;
-    int check_y;
-    int check_x;
-    int check_left;
-    int check_right;
-    int growth;
-    Cross_Upper_Corner_L = 0;
-    Cross_Upper_Corner_R = 0;
-    Cross_Upper_Corner_L_X = 0;
-    Cross_Upper_Corner_R_X = 0;
-    Cross_Upper_Corner_L_Valid = 0;
-    Cross_Upper_Corner_R_Valid = 0;
-    for (y = 0; y < LCDH; y++)
-    {
-        left_score[y] = 0;
-        right_score[y] = 0;
-        left_x[y] = 0;
-        right_x[y] = 0;
-    }
-    if (ImageFlag.image_element_rings || ImageFlag.Zebra_Flag)
-    {
-        return;
-    }
-    for (y = CROSS_PATH_UPPER_START; y <= CROSS_PATH_UPPER_END; y++)
-    {
-        for (x = CROSS_PATH_CORNER_MARGIN; x < LCDW - CROSS_PATH_CORNER_MARGIN; x++)
-        {
-            score = CrossPath_UpperScore(x, y, 0);
-            if (score > left_score[y])
-            {
-                left_score[y] = score;
-                left_x[y] = x;
-            }
-            score = CrossPath_UpperScore(x, y, 1);
-            if (score > right_score[y])
-            {
-                right_score[y] = score;
-                right_x[y] = x;
-            }
-        }
-        if (left_score[y] > best_left)
-        {
-            best_left = left_score[y];
-            Cross_Upper_Corner_L = y;
-            Cross_Upper_Corner_L_X = left_x[y];
-            Cross_Upper_Corner_L_Valid = 1;
-        }
-        if (right_score[y] > best_right)
-        {
-            best_right = right_score[y];
-            Cross_Upper_Corner_R = y;
-            Cross_Upper_Corner_R_X = right_x[y];
-            Cross_Upper_Corner_R_Valid = 1;
-        }
-    }
-    /* 左右必须属于上方同一组，不能用一个黑块的两个反向角点拼成十字。 */
-    for (y = CROSS_PATH_UPPER_START; y <= CROSS_PATH_UPPER_END; y++)
-    {
-        for (yy = CROSS_PATH_UPPER_START; yy <= CROSS_PATH_UPPER_END; yy++)
-        {
-            gap = right_x[yy] - left_x[y];
-            if (!left_score[y] || !right_score[yy] || abs(y - yy) > CROSS_PATH_UPPER_GAP ||
-                gap < LCDW / 5 || gap > LCDW * 9 / 10)
-            {
-                continue;
-            }
-            check_y = (y > yy ? y : yy) + 2 * CROSS_PATH_CORNER_RADIUS;
-            check_x = (left_x[y] + right_x[yy]) / 2;
-            if (check_y >= LCDH - 1 || Pixle[check_y][check_x] != 255)
-            {
-                continue;
-            }
-            /* 普通斜边也可能出现局部黑白角，双角下方须有超出透视增宽的开口。 */
-            check_left = check_x;
-            check_right = check_x;
-            while (check_left > 1 && Pixle[check_y][check_left] == 255)
-            {
-                check_left--;
-            }
-            while (check_right < LCDW - 2 && Pixle[check_y][check_right] == 255)
-            {
-                check_right++;
-            }
-            growth = 2 * (Half_Road_Wide[check_y] - Half_Road_Wide[(y + yy) / 2]);
-            if (check_right - check_left < gap + growth + LCDW / 12)
-            {
-                continue;
-            }
-            score = left_score[y] + right_score[yy] - abs(y - yy);
-            if (score > best)
-            {
-                best = score;
-                Cross_Upper_Corner_L = y;
-                Cross_Upper_Corner_L_X = left_x[y];
-                Cross_Upper_Corner_R = yy;
-                Cross_Upper_Corner_R_X = right_x[yy];
-            }
-        }
-    }
-    if (!best && Cross_Upper_Corner_L_Valid && Cross_Upper_Corner_R_Valid)
-    {
-        /* 单个有效方向仍可观察，但不把几何不匹配的两个点标为一组。 */
-        if (Cross_Upper_Corner_L <= Cross_Upper_Corner_R)
-        {
-            Cross_Upper_Corner_R_Valid = 0;
-        }
-        else
-        {
-            Cross_Upper_Corner_L_Valid = 0;
-        }
-    }
-}
-
-
-#define CROSS_PATH_STEP             3                       //相邻图像行允许的最大横向变化
-#define CROSS_PATH_INF              1000000                 //不可达路径的代价
-#define CROSS_PATH_NEAR_START       (LCDH * 5 / 7)           //近端边界采样起始行
-#define CROSS_PATH_FAR_START        (LCDH / 7)               //前方出口采样起始行
-#define CROSS_PATH_FAR_END          (LCDH / 2)               //前方出口采样结束行
-#define CROSS_PATH_MIN_POINTS       4                       //当前帧方向至少需要的真实采样点
-
-static uint8 cross_path_requested = 0;                     //本帧是否需要十字或异常通道处理
-static uint8 cross_path_valid = 0;                         //本帧路径是否到达控制行
-static uint8 cross_near_valid = 0;
-static uint8 cross_far_valid = 0;
-static float cross_near_slope = 0.0f;                      //只使用当前帧近端边界，不跨帧保存
-static float cross_near_intercept = 0.0f;
-static float cross_far_slope = 0.0f;                       //当前帧前方出口方向
-static float cross_far_intercept = 0.0f;
-static int cross_far_row = 0;
-static int cross_path_end_row = 0;
-static int cross_path_cost = 0;
-static int cross_path_anchor_rows = 0;
-static uint8 cross_path_previous[LCDH][LCDW];              //本帧动态规划回溯方向
-static int cross_path_distance[2][LCDW];                   //只保留相邻两行的路径代价
-static uint8 cross_path_left[2][LCDW];                     //相邻两行白区的左边界
-static uint8 cross_path_right[2][LCDW];                    //相邻两行白区的右边界
-
-static void CrossPath_ClearLine(void)
-{
-    int y;
-    cross_path_requested = 0;
-    cross_path_valid = 0;
-    cross_near_valid = 0;
-    cross_far_valid = 0;
-    cross_near_slope = 0.0f;
-    cross_near_intercept = 0.0f;
-    cross_far_slope = 0.0f;
-    cross_far_intercept = 0.0f;
-    cross_far_row = 0;
-    cross_path_end_row = 0;
-    cross_path_cost = 0;
-    cross_path_anchor_rows = 0;
-    for (y = 0; y < LCDH; y++)
-    {
-        CrossMidLine[y] = -1;
-        CrossLeftLine[y] = -1;
-        CrossRightLine[y] = -1;
-    }
-}
-
-void CrossPath_Reset(void)
-{
-    CrossPath_ClearLine();
-    cross_upper_pair_valid = 0;
-    cross_lower_pair_valid = 0;
-    Cross_Corner_L = 0;
-    Cross_Corner_R = 0;
-    Cross_Corner_L_Valid = 0;
-    Cross_Corner_R_Valid = 0;
-    Cross_Upper_Corner_L = 0;
-    Cross_Upper_Corner_R = 0;
-    Cross_Upper_Corner_L_X = 0;
-    Cross_Upper_Corner_R_X = 0;
-    Cross_Upper_Corner_L_Valid = 0;
-    Cross_Upper_Corner_R_Valid = 0;
-}
-
-uint8 CrossPath_IsActive(void)
-{
-    return cross_path_requested && cross_path_valid;
-}
-
-static uint8 CrossPath_UseMid(void)
-{
-    return cross_path_requested && !ImageFlag.image_element_rings && !ImageFlag.Zebra_Flag;
-}
-
-/* 在当前图像行寻找真实白通道，缺一侧时才用正常半宽估计该行中心。 */
-static uint8 CrossPath_RowPoint(int y, int hint, uint8 far, int *center, int *left, int *right)
-{
-    int x = 1;
-    int start;
-    int end;
-    int c;
-    int width;
-    int expected = 2 * Half_Road_Wide[y];
-    int score;
-    int best = CROSS_PATH_INF;
-    uint8 kind;
-    uint8 result = 0;
-    while (x < LCDW - 1)
-    {
-        if (Pixle[y][x] != 255)
-        {
-            x++;
-            continue;
-        }
-        start = x - 1;
-        while (x < LCDW - 1 && Pixle[y][x] == 255)
-        {
-            x++;
-        }
-        end = x;
-        width = end - start;
-        kind = 0;
-        if (start > 2 && end < LCDW - 3 && width >= expected / 2 && width <= expected * 3 / 2)
-        {
-            c = (start + end) / 2;
-            kind = 2;
-        }
-        else if (!far && start > 2 && end >= LCDW - 3)
-        {
-            c = start + Half_Road_Wide[y];
-            kind = 1;
-        }
-        else if (!far && start <= 2 && end < LCDW - 3)
-        {
-            c = end - Half_Road_Wide[y];
-            kind = 1;
-        }
-        if (!kind || c <= start + 2 || c >= end - 2 || c < 3 || c >= LCDW - 3)
-        {
-            continue;
-        }
-        score = abs(c - hint) + (kind == 2 ? abs(width - expected) / 2 : LCDW / 5);
-        if (score < best)
-        {
-            best = score;
-            *center = c;
-            *left = start;
-            *right = end;
-            result = kind;
-        }
-    }
-    return result;
-}
-
-/* 短区间拟合只为本帧路径提供方向代价，不直接延长为整条中线。 */
-static uint8 CrossPath_FitCurrent(uint8 far, float *slope, float *intercept, int *last_row)
-{
-    int y;
-    int center;
-    int left;
-    int right;
-    int hint = ImageSensorMid;
-    int previous = 0;
-    int count = 0;
-    int first_y = 0;
-    int last_y = 0;
-    int start = far ? CROSS_PATH_FAR_END : LCDH - 2;
-    int finish = far ? CROSS_PATH_FAR_START : CROSS_PATH_NEAR_START;
-    double sum_y = 0.0;
-    double sum_x = 0.0;
-    double sum_yy = 0.0;
-    double sum_yx = 0.0;
-    double denom;
-    float k;
-    float b;
-    for (y = start; y >= finish; y--)
-    {
-        if (far && cross_near_valid)
-        {
-            hint = clip((int)(cross_near_slope * y + cross_near_intercept), 3, LCDW - 4);
-        }
-        if (!CrossPath_RowPoint(y, hint, far, &center, &left, &right))
-        {
-            if (count >= CROSS_PATH_MIN_POINTS)
-            {
-                break;
-            }
-            count = 0;
-            sum_y = sum_x = sum_yy = sum_yx = 0.0;
-            continue;
-        }
-        if (count && abs(center - previous) > LCDW / 16)
-        {
-            if (count >= CROSS_PATH_MIN_POINTS)
-            {
-                break;
-            }
-            count = 0;
-            sum_y = sum_x = sum_yy = sum_yx = 0.0;
-        }
-        if (!count)
-        {
-            first_y = y;
-        }
-        sum_y += y;
-        sum_x += center;
-        sum_yy += (double)y * y;
-        sum_yx += (double)y * center;
-        last_y = y;
-        previous = center;
-        hint = center;
-        count++;
-    }
-    if (count < CROSS_PATH_MIN_POINTS)
-    {
-        return 0;
-    }
-    denom = count * sum_yy - sum_y * sum_y;
-    if (fabs(denom) < 0.001)
-    {
-        return 0;
-    }
-    k = (float)((count * sum_yx - sum_y * sum_x) / denom);
-    b = (float)((sum_x - k * sum_y) / count);
-    if (!(fabs(k) <= CROSS_PATH_STEP) || !(fabs(b) <= LCDW + LCDH * CROSS_PATH_STEP))
-    {
-        return 0;
-    }
-    *slope = k;
-    *intercept = b;
-    *last_row = far ? (first_y + last_y) / 2 : first_y;
-    cross_path_anchor_rows += count;
-    return 1;
-}
-
-static void CrossPath_RowBounds(int y, int row)
-{
-    int x = 1;
-    int start;
-    int end;
-    int p;
-    memset(cross_path_left[row], 0, sizeof(cross_path_left[row]));
-    memset(cross_path_right[row], 0, sizeof(cross_path_right[row]));
-    while (x < LCDW - 1)
-    {
-        if (Pixle[y][x] != 255)
-        {
-            x++;
-            continue;
-        }
-        start = x - 1;
-        while (x < LCDW - 1 && Pixle[y][x] == 255)
-        {
-            x++;
-        }
-        end = x;
-        for (p = start + 1; p < end; p++)
-        {
-            cross_path_left[row][p] = (uint8)start;
-            cross_path_right[row][p] = (uint8)end;
-        }
-    }
-}
-
-static uint8 CrossPath_Build(int prospect)
-{
-    int y;
-    int x;
-    int p;
-    int d;
-    int row;
-    int previous_row;
-    int center;
-    int left;
-    int right;
-    int half;
-    int reference;
-    int heading;
-    int clearance;
-    int local_cost;
-    int cost;
-    int best;
-    int best_x = -1;
-    int end_row = LCDH - 2;
-    int finish;
-    int near_row;
-    float blend;
-    uint8 point;
-    cross_near_valid = CrossPath_FitCurrent(0, &cross_near_slope, &cross_near_intercept, &near_row);
-    cross_far_valid = CrossPath_FitCurrent(1, &cross_far_slope, &cross_far_intercept, &cross_far_row);
-    if (!cross_near_valid && !cross_far_valid)
-    {
-        return 0;
-    }
-    finish = cross_far_valid ? cross_far_row : CROSS_PATH_FAR_START;
-    if (finish >= prospect)
-    {
-        finish = prospect - 1;
-    }
-    finish = clip(finish, CROSS_PATH_FAR_START, LCDH - 3);
-    reference = (int)((cross_near_valid ? cross_near_slope : cross_far_slope) * (LCDH - 2) +
-                      (cross_near_valid ? cross_near_intercept : cross_far_intercept));
-    row = (LCDH - 2) & 1;
-    CrossPath_RowBounds(LCDH - 2, row);
-    best = CROSS_PATH_INF;
-    for (x = 0; x < LCDW; x++)
-    {
-        cross_path_distance[row][x] = CROSS_PATH_INF;
-        cross_path_previous[LCDH - 2][x] = 255;
-        if (x > 2 && x < LCDW - 3 && x - cross_path_left[row][x] >= 2 &&
-            cross_path_right[row][x] - x >= 2)
-        {
-            cost = abs(x - reference) * (cross_near_valid ? 10 : 3);
-            cross_path_distance[row][x] = cost;
-            if (cost < best)
-            {
-                best = cost;
-                best_x = x;
-            }
-        }
-    }
-    if (best_x < 0)
-    {
-        return 0;
-    }
-    for (y = LCDH - 3; y >= finish; y--)
-    {
-        row = y & 1;
-        previous_row = (y + 1) & 1;
-        CrossPath_RowBounds(y, row);
-        if (cross_near_valid && cross_far_valid)
-        {
-            blend = (float)(LCDH - 2 - y) / (LCDH - 2 - cross_far_row);
-            if (blend > 1.0f)
-            {
-                blend = 1.0f;
-            }
-            reference = (int)((1.0f - blend) * (cross_near_slope * y + cross_near_intercept) +
-                              blend * (cross_far_slope * y + cross_far_intercept));
-        }
-        else
-        {
-            reference = (int)((cross_near_valid ? cross_near_slope : cross_far_slope) * y +
-                              (cross_near_valid ? cross_near_intercept : cross_far_intercept));
-        }
-        heading = (int)((cross_near_valid ? cross_near_slope : cross_far_slope) * 4.0f);
-        point = CrossPath_RowPoint(y, clip(reference, 3, LCDW - 4), 1, &center, &left, &right);
-        best = CROSS_PATH_INF;
-        p = -1;
-        for (x = 0; x < LCDW; x++)
-        {
-            cross_path_distance[row][x] = CROSS_PATH_INF;
-            cross_path_previous[y][x] = 255;
-            if (x <= 2 || x >= LCDW - 3 || x - cross_path_left[row][x] < 2 ||
-                cross_path_right[row][x] - x < 2)
-            {
-                continue;
-            }
-            clearance = x - cross_path_left[row][x];
-            if (cross_path_right[row][x] - x < clearance)
-            {
-                clearance = cross_path_right[row][x] - x;
-            }
-            local_cost = abs(x - reference) * 2 + (clearance < 5 ? (5 - clearance) * 4 : 0);
-            if (point)
-            {
-                local_cost += abs(x - center);
-            }
-            for (d = -CROSS_PATH_STEP; d <= CROSS_PATH_STEP; d++)
-            {
-                int px = x + d;
-                if (px <= 2 || px >= LCDW - 3 || cross_path_distance[previous_row][px] >= CROSS_PATH_INF ||
-                    px <= cross_path_left[row][x] || px >= cross_path_right[row][x] ||
-                    x <= cross_path_left[previous_row][px] || x >= cross_path_right[previous_row][px])
-                {
-                    continue;
-                }
-                cost = cross_path_distance[previous_row][px] + local_cost + abs(4 * d - heading) + abs(d) * 2;
-                if (cost < cross_path_distance[row][x])
-                {
-                    cross_path_distance[row][x] = cost;
-                    cross_path_previous[y][x] = (uint8)(d + CROSS_PATH_STEP);
-                }
-            }
-            if (cross_path_distance[row][x] < best)
-            {
-                best = cross_path_distance[row][x];
-                p = x;
-            }
-        }
-        if (p < 0)
-        {
-            break;
-        }
-        best_x = p;
-        end_row = y;
-        cross_path_cost = best;
-    }
-    if (end_row > prospect - 1)
-    {
-        return 0;
-    }
-    x = best_x;
-    for (y = end_row; y < LCDH - 1; y++)
-    {
-        if (x < 3 || x >= LCDW - 3 || Pixle[y][x] != 255)
-        {
-            return 0;
-        }
-        CrossMidLine[y] = x;
-        left = x;
-        right = x;
-        while (left > 1 && Pixle[y][left] == 255)
-        {
-            left--;
-        }
-        while (right < LCDW - 2 && Pixle[y][right] == 255)
-        {
-            right++;
-        }
-        half = Half_Road_Wide[y];
-        CrossLeftLine[y] = clip(x - half, left + 1, x);
-        CrossRightLine[y] = clip(x + half, x, right - 1);
-        if (y < LCDH - 2)
-        {
-            if (cross_path_previous[y][x] > 2 * CROSS_PATH_STEP)
-            {
-                return 0;
-            }
-            x += (int)cross_path_previous[y][x] - CROSS_PATH_STEP;
-        }
-    }
-    cross_path_end_row = end_row;
-    return 1;
-}
-
-static void CrossPath_Update(void)
-{
-    int y;
-    int normal_rows = 0;
-    int prospect = ImageFlag.Cross_Flag ? Vision_ProspectRow[VP_CROSS] : Vision_ProspectRow[VP_NORMAL];
-    CrossPath_ClearLine();
-    if (ImageFlag.image_element_rings || ImageFlag.Zebra_Flag)
-    {
-        return;
-    }
-    for (y = prospect - 1; y <= prospect + 1; y++)
-    {
-        int x = ImageDeal[y].Center;
-        int width = ImageDeal[y].RightBorder - ImageDeal[y].LeftBorder;
-        if (x <= 2 || x >= LCDW - 3 || width < 8 || width > LCDW - 5)
-        {
-            x = NormalMidLine[y];
-        }
-        if (y > prospect - 1 && abs(NormalMidLine[y] - NormalMidLine[y - 1]) > CROSS_PATH_STEP)
-        {
-            continue;
-        }
-        if (x > 2 && x < LCDW - 3 && Pixle[y][x - 1] == 255 &&
-            Pixle[y][x] == 255 && Pixle[y][x + 1] == 255)
-        {
-            normal_rows++;
-        }
-    }
-    cross_path_requested = (ImageFlag.Cross_Flag || normal_rows < 3);
-    if (!cross_path_requested)
-    {
-        return;
-    }
-    cross_path_valid = CrossPath_Build(prospect);
-    if (!cross_path_valid)
-    {
-        /* 当前帧不能连到控制行时不输出局部残线，交由原丢线保护处理。 */
-        for (y = 0; y < LCDH; y++)
-        {
-            CrossMidLine[y] = -1;
-            CrossLeftLine[y] = -1;
-            CrossRightLine[y] = -1;
-        }
-    }
-}
-
-//————————————————————————————————————————————————————————————————————————————————————
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
 //  @name           Straight_Judge
 //  @brief          *****************直线判断******************
@@ -2536,11 +1795,6 @@ float Straight_Judge(uint8 dir, uint8 start, uint8 end)         //返回实际边界与
 {
     int i;
     float S = 0, Sum = 0, Err = 0, k = 0;//每往下一行，边线理论上应该移动多少像素 也就是理想直线的斜率。
-    /* 圆环出口等调用可能给出超过图像的行号，不能越界参与直线判断。 */
-    if (dir < 1 || dir > 3 || start >= LCDH || end >= LCDH || start >= end)
-    {
-        return 1000000.0f;
-    }
     switch (dir)//1：左边界 LeftBorder 2：右边界 RightBorder 3：中线 Center
     {
     case 1:k = (float)(ImageDeal[start].LeftBorder - ImageDeal[end].LeftBorder) / (start - end);
@@ -2825,55 +2079,41 @@ float Cross_white_line=10;
 
 void Element_Judgement_Cross()
 {
-    int left;
-    int right;
+    //每帧先清标志 默认当前没有十字  左右计数先清零
     ImageFlag.Cross_Flag=0;
     ImageStatus.Cross_Miss_Left_lines=0;
     ImageStatus.Cross_Miss_Right_lines=0;
-    cross_upper_pair_valid = 0;
-    cross_lower_pair_valid = 0;
-    CrossPath_FindUpperCorners();
-    Cross_Corner_L_Valid = Cross_Corner_L_Valid && CrossPath_IsCornerValid(0, Cross_Corner_L);
-    Cross_Corner_R_Valid = Cross_Corner_R_Valid && CrossPath_IsCornerValid(1, Cross_Corner_R);
-    if (ImageFlag.image_element_rings || ImageFlag.Zebra_Flag)
+
+    //统计左右 从第 40 行开始，一直往上看，统计左/右边线找不到的行数
+    for(int ysite=40;ysite>ImageStatus.OFFLine+1;ysite--)
     {
-        return;
-    }
-    cross_upper_pair_valid = Cross_Upper_Corner_L_Valid && Cross_Upper_Corner_R_Valid;
-    if (Cross_Corner_L_Valid && Cross_Corner_R_Valid &&
-        abs(Cross_Corner_L - Cross_Corner_R) <= CROSS_PATH_LOWER_GAP)
-    {
-        left = ImageDeal[Cross_Corner_L].LeftBorder;
-        right = ImageDeal[Cross_Corner_R].RightBorder;
-        cross_lower_pair_valid = (right - left >= LCDW / 5 && right - left <= LCDW * 9 / 10);
-    }
-    /* 上下各自成对，不能把左上和右下拼成双角点。 */
-    for (int ysite=LCDH * 4 / 7; ysite>ImageStatus.OFFLine+1; ysite--)
-    {
-        if (ImageDeal[ysite].IsLeftFind=='W')
+        if(ImageDeal[ysite].IsLeftFind=='W')//这一行左边线搜索异常，或者没有找到左边线
         {
             ImageStatus.Cross_Miss_Left_lines++;
         }
-        if (ImageDeal[ysite].IsRightFind=='W')
+        if(ImageDeal[ysite].IsRightFind=='W')
         {
             ImageStatus.Cross_Miss_Right_lines++;
         }
     }
-    /* 原始检测标志只描述当前帧，不保存上一帧的方向或中线。 */
-    if (cross_upper_pair_valid || cross_lower_pair_valid || ImageStatus.WhiteLine >= Cross_white_line ||
-        (ImageStatus.Cross_Miss_Left_lines>12 && ImageStatus.Cross_Miss_Right_lines>12))
+//    ips200_show_int(50,220,ImageStatus.WhiteLine,4);
+
+    /*其他边界搜索算法发现白色区域或白线数量异常 或者 左边线和右边线同时大面积丢失*/
+    /*并且当前不是环岛 */
+    if((ImageStatus.WhiteLine >= Cross_white_line||(ImageStatus.Cross_Miss_Left_lines>12&&ImageStatus.Cross_Miss_Right_lines>12))&&ImageFlag.image_element_rings==0) //十字处理
     {
+//        BeeOn;
         ImageFlag.Cross_Flag=1;
     }
+//    if(ImageFlag.Cross_Flag==0){
+//        BeeOff;
+//    }
+
 }
-//十字中线函数 根据当前帧的近端边界和前方白通道，重新计算连续中线
-// void Element_Handle_Cross()
-// {
-//     Get_ExtensionLine();
-// }
+//十字补线函数 根据十字之前的左右边线 用已经知道的斜率延长出丢失的边线 重新生成十字区域的中线
 void Element_Handle_Cross()
 {
-    CrossPath_Update();
+    Get_ExtensionLine();
 }
 
 //--------------------------------------------------------------
@@ -3521,8 +2761,8 @@ static uint8 Vision_SelectProspectType(void)
         return VP_RING_INSIDE;
     }
 
-    /* 当前帧确认十字时使用十字前瞻，异常普通通道仍保留普通前瞻。 */
-    if (ImageFlag.Cross_Flag && CrossPath_UseMid())
+    /* 十字 */
+    if (ImageFlag.Cross_Flag == 1)
     {
         return VP_CROSS;
     }
@@ -3556,11 +2796,7 @@ void ControlMid_Update(void)
         right  = ImageDeal[i].RightBorder;
         wide   = right - left;
 
-        if (CrossPath_UseMid())
-        {
-            ControlMidLine[i] = CrossMidLine[i];
-        }
-        else if (ring_active &&
+        if (ring_active &&
             center > 2 &&
             center < LCDW - 2)
         {
@@ -3593,20 +2829,6 @@ void ControlMid_Update(void)
     if (ControlProspectRow >= LCDH)
     {
         ControlProspectRow = LCDH - 1;
-    }
-
-    /* 当前白通道没有连到控制行时，不用局部残线代替有效控制目标。 */
-    if (CrossPath_UseMid())
-    {
-        if (CrossMidLine[ControlProspectRow] < 0 || !cross_path_valid)
-        {
-            return;
-        }
-        /* 控制参考点必须就是该行的连通路径点，不能跨行平均后落到黑区。 */
-        ControlMidValue = CrossMidLine[ControlProspectRow];
-        ControlMidError = ImageSensorMid - ControlMidValue;
-        ControlMidValid = 1;
-        return;
     }
 
     /* 3. 先取控制行附近三行 */
@@ -3724,7 +2946,6 @@ void Scan_Element(void)
 {
     Element_Judgment_Zebra();
 
-    /* 保留圆环独立识别入口，不能因为十字大白区候选而跳过圆环检测。 */
     Element_Judgement_Left_Rings();
     Element_Judgment_Right_Rings();
 
@@ -3735,12 +2956,6 @@ void Scan_Element(void)
 /*元素处理函数*/
 void Element_Handle()
 {
-    /* 记录本帧优先元素，圆环或斑马线即使本帧退出，也不再执行十字补线。 */
-    uint8 priority_element = (ImageFlag.image_element_rings != 0 || ImageFlag.Zebra_Flag != 0);
-    if (priority_element)
-    {
-        CrossPath_Reset();
-    }
 
 
     if(ImageFlag.straight_long == 1)
@@ -3761,7 +2976,7 @@ void Element_Handle()
     }
 
 
-    if (!priority_element)
+    if(ImageFlag.Cross_Flag==1)
     {
         Element_Handle_Cross();
     }
