@@ -20,7 +20,7 @@
 #define RUN_STALL_SPEED_MAX (5)        // 实际速度绝对值小于 5cm/s 视为停转
 #define RUN_SPEED_ACCEL_STEP (8)       // 10ms 加速步长，保守初值，需实车标定
 #define RUN_SPEED_DECEL_STEP (10)       // 10ms 减速步长，必须大于加速步长，需实车标定
-#define SPEED_MID (200)                // 调试层默认目标速度
+#define SPEED_MID (220)                // 调试层默认目标速度
 #define STEER_OUTPUT_MAP_SCALE (0.20)  // 转向输出换算成舵机角的缩放系数
 
 // 原版回退参数（新版普通赛道使用下方标定表）：Track_Slope_x1000 是弯道趋势而非严格几何曲率，以下参数均需实车标定。
@@ -28,12 +28,12 @@
 #define RUN_CURVE_SLOPE_LOW (150)          // 轻弯起点 S1
 #define RUN_CURVE_SLOPE_MID (500)          // 中弯分段点 S2
 #define RUN_CURVE_SLOPE_HIGH (1000)        // 急弯分段点 S3
-#define RUN_SPEED_CURVE_MILD (160)         // 未确认长直道/中等弯道的速度上限
-#define RUN_SPEED_CURVE_MIN (160)          // 急弯最低速度上限
-#define RUN_SPEED_UNKNOWN_LIMIT (160)      // slope 无效时的保守速度上限
-#define RUN_SPEED_CROSS_LIMIT (160)        // 十字速度上限
-#define RUN_SPEED_RING_LIMIT (160)         // 环岛速度上限
-#define RUN_SPEED_LINE_LOST_LIMIT (120)    // 丢线时的安全速度上限
+#define RUN_SPEED_CURVE_MILD (200)         // 未确认长直道/中等弯道的速度上限
+#define RUN_SPEED_CURVE_MIN (180)          // 急弯最低速度上限
+#define RUN_SPEED_UNKNOWN_LIMIT (180)      // slope 无效时的保守速度上限
+#define RUN_SPEED_CROSS_LIMIT (200)        // 十字速度上限
+#define RUN_SPEED_RING_LIMIT (180)         // 环岛速度上限
+#define RUN_SPEED_LINE_LOST_LIMIT (160)    // 丢线时的安全速度上限
 
 #if RUN_SPEED_PLANNER_ENABLE
 #define RUN_STRAIGHT_CONFIRM_FRAMES (6U)   // 至少六个有效新帧，不按调度次数累计
@@ -145,28 +145,27 @@ static void run_init_fuzzy_direction(void)
     static const double delta_points[FUZZY_PID_LEVEL_COUNT] =
         {-16.0, -9.0, -4.0, 0.0, 4.0, 9.0, 16.0};
     static const double kp_offsets[FUZZY_PID_LEVEL_COUNT] =
-        {-0.35, -0.25, -0.10, 0.0, 0.10, 0.22, 0.30};
+        {-0.35, -0.25, -0.12, 0.0, 0.12, 0.25, 0.35};
     static const double kd_offsets[FUZZY_PID_LEVEL_COUNT] =
-        {-0.18, -0.12, -0.07, 0.0, 0.07, 0.12, 0.18};
-    static const unsigned char kp_rules[FUZZY_PID_LEVEL_COUNT][FUZZY_PID_LEVEL_COUNT] =
-    {
-        {6, 5, 5, 5, 3, 3, 2},
+        {-0.18, -0.12, -0.08, 0.0, 0.08, 0.12, 0.18};
+    static const unsigned char kp_rules[7][7] = {
+        {6, 5, 5, 5, 4, 4, 3},   // NB 行右侧 +1
         {5, 5, 4, 4, 3, 3, 2},
         {4, 4, 3, 2, 2, 2, 1},
-        {1, 1, 2, 2, 2, 1, 1},
+        {1, 1, 2, 2, 2, 1, 1},   // ZO 行不动
         {1, 2, 2, 2, 3, 4, 4},
         {2, 3, 3, 4, 4, 5, 5},
-        {2, 3, 3, 5, 5, 5, 6}
+        {4, 4, 4, 5, 5, 5, 6}    // PB 行左侧 +1~+2
     };
-    static const unsigned char kd_rules[FUZZY_PID_LEVEL_COUNT][FUZZY_PID_LEVEL_COUNT] =
-    {
-        {2, 2, 2, 3, 4, 5, 5},
+
+    static const unsigned char kd_rules[7][7] = {
+        {4, 3, 2, 3, 4, 5, 5},   // NB 行左侧 +1~+2
         {2, 2, 3, 4, 5, 5, 6},
         {2, 3, 3, 4, 5, 5, 6},
         {2, 2, 2, 1, 2, 2, 2},
         {6, 5, 5, 4, 3, 3, 2},
         {6, 5, 5, 4, 3, 2, 2},
-        {5, 5, 4, 3, 2, 2, 2}
+        {5, 5, 4, 3, 2, 3, 4}    // PB 行右侧 +1~+2
     };
     FuzzyPID_Config_t config;
     unsigned char row;
@@ -271,8 +270,8 @@ void run_init(void)
     hardware_init();
     memset(&run_imu_monitor, 0, sizeof(run_imu_monitor));
     run_imu_age_ms = 65535U;
-    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3500, -3500, 0, 0);
-    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 0.09, 0.03, 0.0, 3500, -3500, 0, 0);
+    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 2.3, 0.015, 0.0, 3500, -3500, 0, 0);
+    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 2.3, 0.015, 0.0, 3500, -3500, 0, 0);
 #if RUN_STEER_FUZZY_ENABLE
     PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.25, 0.0, 0.36, 90, -90, 0, 0);
     run_init_fuzzy_direction();

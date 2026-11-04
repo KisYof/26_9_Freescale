@@ -54,6 +54,16 @@ extern int NormalMidValue;
 extern int NormalMidError;
 extern uint8 NormalMidValid;
 
+extern int CrossMidLine[LCDH];                              //当前帧白通道生成的十字中线
+extern int CrossLeftLine[LCDH];                             //十字虚拟左边界
+extern int CrossRightLine[LCDH];                            //十字虚拟右边界
+extern int Cross_Upper_Corner_L;
+extern int Cross_Upper_Corner_L_X;
+extern int Cross_Upper_Corner_R;
+extern int Cross_Upper_Corner_R_X;
+extern uint8 Cross_Upper_Corner_L_Valid;
+extern uint8 Cross_Upper_Corner_R_Valid;
+
 void NormalMid_Update(void);
 
 extern volatile int16 Track_Slope_x1000;
@@ -165,7 +175,8 @@ void Get_AllLine(void);
 void Get_ExtensionLine(void);
 void Flag_init(void);
 void Data_init(void);
-void CrossFill_Reset(void);
+void CrossPath_Reset(void);
+uint8 CrossPath_IsActive(void);                              //当前帧通道是否形成有效中线
 extern uint8 get_Threshold(uint8* image[][LCDW],uint16 col, uint16 row);
 extern uint32 break_road(uint8 line_start);
 
