@@ -32,8 +32,8 @@
 // ------------------ 舵机 ------------------
 #define SERVO_MOTOR_PWM (ATOM1_CH1_P33_9)  // 舵机 PWM 引脚
 #define SERVO_MOTOR_FREQ (50)              // 舵机控制频率，单位 Hz
-#define SERVO_MOTOR_L_MAX (77)             // 左极限：90-angle 的下限
-#define SERVO_MOTOR_R_MAX (103)            // 右极限：90+angle 的上限
+#define SERVO_MOTOR_L_MAX (78)             // 左极限：91-angle 的下限
+#define SERVO_MOTOR_R_MAX (104)            // 右极限：91+angle 的上限
 #define SERVO_MOTOR_DUTY(x) ((float)PWM_DUTY_MAX / (1000.0 / (float)SERVO_MOTOR_FREQ) * (0.5 + (float)(x) / 90.0)) // 舵机角 -> 占空比：0 度=0.5ms，90 度=1.5ms，180 度=2.5ms
 
 // 编译期校验：舵机频率超出 50~300Hz 直接报错
@@ -121,20 +121,20 @@ static void hardware_set_right_motor(int16 duty)
     }
 }
 
-// angle 是相对中位（0）的转角：先限幅，再换算成 90±12 度的舵机角输出占空比。
+// angle 是相对中位（0）的转角：先限幅，再换算成 91±12 度的舵机角输出占空比。
 void hardware_set_servo(int16 angle)
 {
-    // 限幅：保证 90-angle 落在 [SERVO_MOTOR_L_MAX, SERVO_MOTOR_R_MAX] 内，即输入角约 ±12 度
-    if (90 - angle < SERVO_MOTOR_L_MAX)
+    // 限幅：保证 91-angle 落在 [SERVO_MOTOR_L_MAX, SERVO_MOTOR_R_MAX] 内，即输入角约 ±12 度
+    if (91 - angle < SERVO_MOTOR_L_MAX)
     {
-        angle = 90 - SERVO_MOTOR_L_MAX;
+        angle = 91 - SERVO_MOTOR_L_MAX;
     }
-    else if (90 - angle > SERVO_MOTOR_R_MAX)
+    else if (91 - angle > SERVO_MOTOR_R_MAX)
     {
-        angle = 90 - SERVO_MOTOR_R_MAX;
+        angle = 91 - SERVO_MOTOR_R_MAX;
     }
-    // 90 度中位对应 1.5ms 脉宽
-    pwm_set_duty(SERVO_MOTOR_PWM, (uint32)SERVO_MOTOR_DUTY(90 - angle));
+    // 91 度中位对应 1.5ms 脉宽
+    pwm_set_duty(SERVO_MOTOR_PWM, (uint32)SERVO_MOTOR_DUTY(91 - angle));
 }
 
 // 停车输出：两轮占空比归零、舵机回中位，故障和状态切换时统一调用。
