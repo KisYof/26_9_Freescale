@@ -20,30 +20,21 @@
 #define RUN_STALL_SPEED_MAX (5)        // 实际速度绝对值小于 5cm/s 视为停转
 #define RUN_SPEED_ACCEL_STEP (10)       // 10ms 加速步长，保守初值，需实车标定
 #define RUN_SPEED_DECEL_STEP (30)       // 10ms 减速步长，必须大于加速步长，需实车标定
-#define SPEED_MID (240)                // 调试层默认目标速度
+#define SPEED_MID (250)                // 调试层默认目标速度
 #define STEER_OUTPUT_MAP_SCALE (0.25)  // 转向输出换算成舵机角的缩放系数
 
-// 原版回退参数（新版普通赛道使用下方标定表）：Track_Slope_x1000 是弯道趋势而非严格几何曲率，以下参数均需实车标定。
-#define RUN_STRAIGHT_SLOPE_THRESHOLD (120) // 新版 <=120；回退模式 <120 且 straight_long 有效
-#define RUN_CURVE_SLOPE_LOW (150)          // 轻弯起点 S1
-#define RUN_CURVE_SLOPE_MID (500)          // 中弯分段点 S2
-#define RUN_CURVE_SLOPE_HIGH (1000)        // 急弯分段点 S3
-#define RUN_SPEED_CURVE_MILD (220)         // 未确认长直道/中等弯道的速度上限
-#define RUN_SPEED_CURVE_MIN (170)          // 急弯最低速度上限
+// Track_Slope_x1000 是弯道趋势而非严格几何曲率，速度标定表见 run_calc_curve_speed_limit。
+#define RUN_STRAIGHT_SLOPE_THRESHOLD (120) // 低风险直道许可阈值
 #define RUN_SPEED_UNKNOWN_LIMIT (150)      // slope 无效时的保守速度上限
 #define RUN_SPEED_CROSS_LIMIT (180)        // 十字速度上限
 #define RUN_SPEED_RING_LIMIT (180)         // 环岛速度上限
 #define RUN_SPEED_LINE_LOST_LIMIT (120)    // 丢线时的安全速度上限
 
-#if RUN_SPEED_PLANNER_ENABLE
 #define RUN_STRAIGHT_CONFIRM_FRAMES (8U)   // 至少八个有效新帧，不按调度次数累计
 #define RUN_STRAIGHT_REVOKE_SLOPE (120)
 #define RUN_STRAIGHT_MID_CONFIRM (10)
 #define RUN_STRAIGHT_MID_REVOKE (10)
-#define RUN_SPEED_UNCONFIRMED_LIMIT (230)
-#else
-#define RUN_STRAIGHT_CONFIRM_FRAMES (4U)   // 原版回退参数
-#endif
+#define RUN_SPEED_UNCONFIRMED_LIMIT (240)
 
 // 原始速度与滤波后速度：只在 2ms 速度任务里更新
 volatile int16 raw_left = 0;
@@ -89,9 +80,7 @@ static volatile int16 run_safety_speed_limit = 0;  // 丢线产生的速度上�
 static uint8 run_straight_confirm_count = 0;
 static volatile uint8 run_straight_confirmed = 0;
 static volatile int16 run_curve_risk = 0; // 速度规划专用绝对倾斜风险，不进入方向环
-#if RUN_SPEED_PLANNER_ENABLE
 static uint32 run_curve_risk_x4 = 0;     // Q2 保留小数，下降权重 3/4
-#endif
 static uint32 run_speed_planner_frame_sequence = 0;
 static run_imu_monitor_t run_imu_monitor;
 static volatile uint16 run_imu_age_ms = 65535U;
@@ -105,13 +94,11 @@ static uint8 run_start_pending = 0;     // KEY1 请求后等待 CPU1 完成原�
 static uint16 run_start_wait_ticks = 0; // 独立复位等待计时，不被持续来帧清零
 static uint32 run_start_frame_sequence = 0;
 
-// 三路 PID：左右轮速度环为增量式，转向环为位置式
+// 左右轮使用增量式 PID，转向使用模糊 PD；方向基准参数独立保存。
 static PID_Controller_t pid_left;
 static PID_Controller_t pid_right;
-static PID_Controller_t pid_gap; // 模糊模式下保留基准参数和原调试通道，不执行普通 PID
-#if RUN_STEER_FUZZY_ENABLE
+static run_gains_t steer_base_gains;
 static FuzzyPID_Controller_t fuzzy_gap;
-#endif
 
 // 编码器滤波：滑动平均窗口 + 一阶低通；steer_input_filter 用于中线偏差
 #define ENCODER_FILTER_WINDOW (20)
@@ -136,7 +123,6 @@ static int16 run_calc_safety_speed_limit(const run_vision_struct *vision);
 static int16 run_speed_planner(const run_vision_struct *vision);
 static void run_update_speed_ramp(int16 target_speed);
 
-#if RUN_STEER_FUZZY_ENABLE
 // 初始启发式标定，E/EC 保持现有误差单位和 10ms 离散差分，不除以秒。
 static void run_init_fuzzy_direction(void)
 {
@@ -197,7 +183,6 @@ static void run_init_fuzzy_direction(void)
     config.output_max = 90.0;
     FuzzyPID_Init(&fuzzy_gap, &config, 1.25, 0.0, 0.36);
 }
-#endif
 
 // 启动和上电共用的反馈复位，不参与普通停车或故障现场记录。
 static void run_reset_speed_feedback(void)
@@ -272,12 +257,10 @@ void run_init(void)
     run_imu_age_ms = 65535U;
     PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 40.3, 0.07, 0.0, 4000, -4000, 0, 0);
     PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 40.3, 0.07, 0.0, 4000, -4000, 0, 0);
-#if RUN_STEER_FUZZY_ENABLE
-    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 0.80, 0.0, 0.22, 100, -100, 0, 0);
+    steer_base_gains.kp = 0.80;
+    steer_base_gains.ki = 0.0;
+    steer_base_gains.kd = 0.22;
     run_init_fuzzy_direction();
-#else
-    PID_Controller_Init(&pid_gap, PID_ALGORITHM_POS, 1.4, 0.0, 0.5, 90, -90, 0, 0);
-#endif
     run_reset_speed_feedback();
     run_ready = 0;
     run_toggle_request = 0;
@@ -342,9 +325,9 @@ void run_get_params(run_params_t *params)
     params->pid[RUN_PID_RIGHT].kp = pid_right.controller.inc.Kp;
     params->pid[RUN_PID_RIGHT].ki = pid_right.controller.inc.Ki;
     params->pid[RUN_PID_RIGHT].kd = pid_right.controller.inc.Kd;
-    params->pid[RUN_PID_STEER].kp = pid_gap.controller.pos.Kp;
-    params->pid[RUN_PID_STEER].ki = pid_gap.controller.pos.Ki;
-    params->pid[RUN_PID_STEER].kd = pid_gap.controller.pos.Kd;
+    params->pid[RUN_PID_STEER].kp = steer_base_gains.kp;
+    params->pid[RUN_PID_STEER].ki = steer_base_gains.ki;
+    params->pid[RUN_PID_STEER].kd = steer_base_gains.kd;
     interrupt_global_enable(interrupt_state);
 }
 
@@ -388,12 +371,10 @@ uint8 run_apply_params(const run_params_t *params)
             return 0;
         }
     }
-#if RUN_STEER_FUZZY_ENABLE
     if (params->pid[RUN_PID_STEER].ki != 0.0)
     {
         return 0;
     }
-#endif
     interrupt_state = interrupt_global_disable();
     if (RUN_STATE_IDLE != run_status.state || run_start_pending || run_toggle_request)
     {
@@ -407,9 +388,9 @@ uint8 run_apply_params(const run_params_t *params)
     pid_right.controller.inc.Kp = params->pid[RUN_PID_RIGHT].kp;
     pid_right.controller.inc.Ki = params->pid[RUN_PID_RIGHT].ki;
     pid_right.controller.inc.Kd = params->pid[RUN_PID_RIGHT].kd;
-    pid_gap.controller.pos.Kp = params->pid[RUN_PID_STEER].kp;
-    pid_gap.controller.pos.Ki = params->pid[RUN_PID_STEER].ki;
-    pid_gap.controller.pos.Kd = params->pid[RUN_PID_STEER].kd;
+    steer_base_gains.kp = params->pid[RUN_PID_STEER].kp;
+    steer_base_gains.ki = params->pid[RUN_PID_STEER].ki;
+    steer_base_gains.kd = params->pid[RUN_PID_STEER].kd;
     interrupt_global_enable(interrupt_state);
     return 1;
 }
@@ -442,12 +423,9 @@ void run_get_monitor(run_monitor_t *monitor)
     monitor->pid_values[3] = pid_right.controller.inc.target;
     monitor->pid_values[4] = pid_right.controller.inc.actual;
     monitor->pid_values[5] = pid_right.controller.inc.output;
-    monitor->pid_values[6] = pid_gap.controller.pos.target;
-    monitor->pid_values[7] = pid_gap.controller.pos.actual;
-    monitor->pid_values[8] = pid_gap.controller.pos.output;
-    monitor->fuzzy_error = monitor->fuzzy_delta = monitor->fuzzy_kp = monitor->fuzzy_kd = monitor->fuzzy_output = 0;
-    monitor->fuzzy_saturated = 0;
-#if RUN_STEER_FUZZY_ENABLE
+    monitor->pid_values[6] = fuzzy_gap.target;
+    monitor->pid_values[7] = fuzzy_gap.actual;
+    monitor->pid_values[8] = fuzzy_gap.output;
     monitor->fuzzy_error = fuzzy_gap.error;
     monitor->fuzzy_delta = fuzzy_gap.delta_error;
     monitor->fuzzy_kp = fuzzy_gap.active_kp;
@@ -455,7 +433,6 @@ void run_get_monitor(run_monitor_t *monitor)
     monitor->fuzzy_output = fuzzy_gap.output;
     monitor->fuzzy_saturated = fuzzy_gap.output >= fuzzy_gap.config.output_max
                       || fuzzy_gap.output <= fuzzy_gap.config.output_min;
-#endif
     interrupt_global_enable(interrupt_state);
 }
 
@@ -472,10 +449,7 @@ static void run_enter_state(run_state_enum state)
     hardware_stop();
     PID_Controller_Reset(&pid_left);
     PID_Controller_Reset(&pid_right);
-    PID_Controller_Reset(&pid_gap);
-#if RUN_STEER_FUZZY_ENABLE
     FuzzyPID_Reset(&fuzzy_gap);
-#endif
     filter_rc_state_reset(&steer_input_filter);
     run_held_mid_error = 0;
     run_direction_gap = 0;
@@ -486,9 +460,7 @@ static void run_enter_state(run_state_enum state)
     run_straight_confirm_count = 0;
     run_straight_confirmed = 0;
     run_curve_risk = 0;
-#if RUN_SPEED_PLANNER_ENABLE
     run_curve_risk_x4 = 0;
-#endif
     run_speed_planner_frame_sequence = 0;
     if (RUN_STATE_FAULT == state)
         run_toggle_request = 0;
@@ -530,23 +502,12 @@ static void run_update_direction(void)
         run_held_mid_error = run_vision.mid_error;
 
     filtered_mid_error = filter_rc_low_pass(&steer_input_filter, (float)run_held_mid_error, 0.6);
-#if RUN_STEER_FUZZY_ENABLE
-    // 调参仍写原 pid_gap 的 Kp/Kd；下一次 10ms 周期使用新基准值，Ki 永久为零。
-    pid_gap.controller.pos.Ki = 0.0;
-    FuzzyPID_SetBaseGains(&fuzzy_gap, pid_gap.controller.pos.Kp, 0.0,
-                         pid_gap.controller.pos.Kd);
+    // 下一次 10ms 周期使用调参接口提交的基准值，Ki 永久为零。
+    steer_base_gains.ki = 0.0;
+    FuzzyPID_SetBaseGains(&fuzzy_gap, steer_base_gains.kp, 0.0,
+                         steer_base_gains.kd);
     // E = 0 - filtered_mid_error；重复视觉误差时 EC 自动归零。
     run_direction_gap = FuzzyPID_Calc(&fuzzy_gap, 0, (double)filtered_mid_error);
-    // 同步原 target / actual / output 调试通道，保持上位机和串口数据顺序。
-    pid_gap.controller.pos.target = fuzzy_gap.target;
-    pid_gap.controller.pos.actual = fuzzy_gap.actual;
-    pid_gap.controller.pos.output = fuzzy_gap.output;
-    pid_gap.controller.pos.Error1 = pid_gap.controller.pos.Error0;
-    pid_gap.controller.pos.Error0 = fuzzy_gap.error;
-    pid_gap.controller.pos.ErrorInt = 0.0;
-#else
-    run_direction_gap = PID_Controller_Calc(&pid_gap, 0, (double)filtered_mid_error);
-#endif
 }
 
 // 返回最近一个 10ms 方向周期产生的方向输出，供 2ms 速度任务复用。
@@ -656,15 +617,14 @@ static int16 run_speed_limit_lerp(int16 value, int16 input_low, int16 input_high
     return (int16)(output_low + numerator / (input_high - input_low));
 }
 
-// 普通赛道：风险滤波后连续单调映射，未确认直道限制在 215。
+// 普通赛道：风险滤波后连续单调映射，未确认直道受 RUN_SPEED_UNCONFIRMED_LIMIT 限制。
 // straight_long 保留作观测参考；普通直道由倾斜和中线偏差连续八帧确认。
 static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 user_limit)
 {
-#if RUN_SPEED_PLANNER_ENABLE
-    // 低斜率试验：保留表首项215，未确认上限215；150->200、300->190；500起使用170/165/150，试探中急弯速度余量。
+    // 普通赛道的斜率与速度标定表。
     // 风险上升立即响应，下降沿用新帧缓释；不是额外的远端曲率预测。
     static const int16 slope_points[] = {0, 120, 150, 300, 500, 800, 1100};
-    static const int16 speed_points[] = {230, 215, 205, 195, 180, 175, 170};
+    static const int16 speed_points[] = {240, 235, 230, 215, 195, 190, 180};
     int16 limit = speed_points[sizeof(speed_points) / sizeof(speed_points[0]) - 1U];
     int16 slope = run_curve_risk;
     uint8 point;
@@ -696,38 +656,6 @@ static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 u
     if (!run_straight_confirmed && limit > RUN_SPEED_UNCONFIRMED_LIMIT)
         limit = RUN_SPEED_UNCONFIRMED_LIMIT;
     return (user_limit < limit) ? user_limit : limit;
-#else
-    int16 mild_limit = (user_limit < RUN_SPEED_CURVE_MILD) ? user_limit : RUN_SPEED_CURVE_MILD;
-    int16 minimum_limit = (user_limit < RUN_SPEED_CURVE_MIN) ? user_limit : RUN_SPEED_CURVE_MIN;
-    int32 slope = vision->track_slope;
-
-    if (!vision->track_slope_valid)
-    {
-        return (user_limit < RUN_SPEED_UNKNOWN_LIMIT) ? user_limit : RUN_SPEED_UNKNOWN_LIMIT;
-    }
-
-    if (slope < 0)
-        slope = -slope;
-    if (slope > 32767)
-        slope = 32767;
-    if (slope <= RUN_CURVE_SLOPE_LOW)
-    {
-        return run_straight_confirmed ? user_limit : mild_limit;
-    }
-    if (slope < RUN_CURVE_SLOPE_MID)
-    {
-        return run_speed_limit_lerp((int16)slope,
-                                    RUN_CURVE_SLOPE_LOW, RUN_CURVE_SLOPE_MID,
-                                    user_limit, mild_limit);
-    }
-    if (slope < RUN_CURVE_SLOPE_HIGH)
-    {
-        return run_speed_limit_lerp((int16)slope,
-                                    RUN_CURVE_SLOPE_MID, RUN_CURVE_SLOPE_HIGH,
-                                    mild_limit, minimum_limit);
-    }
-    return minimum_limit;
-#endif
 }
 
 // 环岛和十字的补线会影响 slope，因此使用独立上限，并与其他限制取最小值。
@@ -762,18 +690,15 @@ static int16 run_speed_planner(const run_vision_struct *vision)
     // 反向/停车命令保留原语义；当前前向赛道规划仅处理正速度。
     if (planned <= 0)
     {
-#if RUN_SPEED_PLANNER_ENABLE
         run_straight_confirm_count = 0;
         run_straight_confirmed = 0;
         run_speed_planner_frame_sequence = vision->frame_sequence;
-#endif
         run_curve_speed_limit = planned;
         run_element_speed_limit = planned;
         run_safety_speed_limit = planned;
         return planned;
     }
 
-#if RUN_SPEED_PLANNER_ENABLE
     // 重复同一视觉帧不更新 risk，也不累计直道帧；任何危险标志立即撤销许可。
     if (slope < 0)
         slope = -slope;
@@ -821,37 +746,6 @@ static int16 run_speed_planner(const run_vision_struct *vision)
         }
         // 失效/元素期间不把 risk 清零，不用该帧的低 slope 提前恢复高速。
     }
-#else
-    // 直道确认按“新视觉帧”计数，而不是按 10ms 调度次数重复累计同一帧。
-    if (vision->frame_sequence != run_speed_planner_frame_sequence)
-    {
-        run_speed_planner_frame_sequence = vision->frame_sequence;
-        if (slope < 0)
-            slope = -slope;
-
-        if (vision->track_slope_valid
-            && slope < RUN_STRAIGHT_SLOPE_THRESHOLD
-            && vision->straight_long)
-        {
-            if (run_straight_confirm_count < RUN_STRAIGHT_CONFIRM_FRAMES)
-                run_straight_confirm_count++;
-            if (run_straight_confirm_count >= RUN_STRAIGHT_CONFIRM_FRAMES)
-                run_straight_confirmed = 1;
-        }
-        else
-        {
-            run_straight_confirm_count = 0;
-            // slope 阈值留出 S1-StraightThreshold 的回差，避免临界值轻微抖动反复切换。
-            if (!vision->track_slope_valid
-                || !vision->straight_long
-                || slope >= RUN_CURVE_SLOPE_LOW)
-            {
-                run_straight_confirmed = 0;
-            }
-        }
-    }
-
-#endif
 
     run_curve_speed_limit = run_calc_curve_speed_limit(vision, planned);
     run_element_speed_limit = run_calc_element_speed_limit(vision);

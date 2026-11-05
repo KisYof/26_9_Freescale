@@ -154,11 +154,7 @@ void run_debug_init(void)
     (void)ucmd_reg_double_range(&pid_debug_cmd, "rki", &uart_params.pid[RUN_PID_RIGHT].ki, 0, RUN_PARAM_GAIN_MAX);
     (void)ucmd_reg_double_range(&pid_debug_cmd, "rkd", &uart_params.pid[RUN_PID_RIGHT].kd, 0, RUN_PARAM_GAIN_MAX);
     (void)ucmd_reg_double_range(&pid_debug_cmd, "dkp", &uart_params.pid[RUN_PID_STEER].kp, 0, RUN_PARAM_GAIN_MAX);
-#if RUN_STEER_FUZZY_ENABLE
     (void)ucmd_reg_double_range(&pid_debug_cmd, "dki", &uart_params.pid[RUN_PID_STEER].ki, 0, 0);
-#else
-    (void)ucmd_reg_double_range(&pid_debug_cmd, "dki", &uart_params.pid[RUN_PID_STEER].ki, 0, RUN_PARAM_GAIN_MAX);
-#endif
     (void)ucmd_reg_double_range(&pid_debug_cmd, "dkd", &uart_params.pid[RUN_PID_STEER].kd, 0, RUN_PARAM_GAIN_MAX);
 #endif
 
@@ -451,11 +447,9 @@ static void wifi_pid_oscilloscope_send(void)
 #if RUN_CURVE_DEBUG_ENABLE
     // 斜率是图像中线倾斜代理，不是具有物理单位的几何曲率。
     // 9/12 沿用上方原始斜率与有效标志；保留 0~5 双轮通道用于排查外力干预。
-#if RUN_STEER_FUZZY_ENABLE
     wifi_pid_oscilloscope_buffer[6] = (float)debug_monitor.fuzzy_error;
     wifi_pid_oscilloscope_buffer[7] = (float)debug_monitor.fuzzy_delta;
     wifi_pid_oscilloscope_buffer[8] = (float)debug_monitor.fuzzy_output;
-#endif
     wifi_pid_oscilloscope_buffer[13] = (float)debug_monitor.curve_speed_limit;
 #elif RUN_SPEED_PLANNER_DEBUG_ENABLE
     // V2 仍为 16 通道：保留双轮 target/actual/PWM、gap、原始 slope、计划和斜坡速度。
@@ -463,7 +457,7 @@ static void wifi_pid_oscilloscope_send(void)
     wifi_pid_oscilloscope_buffer[6] = (float)debug_monitor.curve_risk;
     wifi_pid_oscilloscope_buffer[7] = (float)debug_monitor.curve_speed_limit;
     wifi_pid_oscilloscope_buffer[13] = (float)debug_monitor.straight_confirmed;
-#elif (RUN_STEER_FUZZY_ENABLE && RUN_STEER_FUZZY_DEBUG_ENABLE)
+#elif RUN_STEER_FUZZY_DEBUG_ENABLE
     // 可选观测模式：6=E, 7=受限 EC, 8=u, 9=Kp_eff, 12=Kd_eff, 13=饱和。
     // 0~5 双轮、10~11 速度、14~15 元素/丢线保持原顺序；默认模式完全兼容。
     wifi_pid_oscilloscope_buffer[6] = (float)debug_monitor.fuzzy_error;

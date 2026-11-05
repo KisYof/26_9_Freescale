@@ -7,11 +7,6 @@
 // 1ms 基础调度、2ms 双轮速度 PID、10ms 方向 PID、堵转和视觉超时保护。
 // 运行期间的状态只由控制中断改写，UI/通信通过快照和参数接口访问。
 
-// 1: 模糊 PD；0: 原位置式 PD (1.4 / 0 / 0.5)，重编译后切换。
-#ifndef RUN_STEER_FUZZY_ENABLE
-#define RUN_STEER_FUZZY_ENABLE (1)
-#endif
-
 // 0: 原 16 通道；1: 将方向组及部分规划通道切换为模糊 PD 观测量。
 #ifndef RUN_STEER_FUZZY_DEBUG_ENABLE
 #define RUN_STEER_FUZZY_DEBUG_ENABLE (1)
@@ -21,11 +16,6 @@
 // 仅切换遥测通道，不改变速度规划、PID 或车辆控制；0 恢复下方原观测模式。
 #ifndef RUN_CURVE_DEBUG_ENABLE
 #define RUN_CURVE_DEBUG_ENABLE (1)
-#endif
-
-// 1: 新速度规划；0: 原版速度映射/直道许可。安全修复始终保留。
-#ifndef RUN_SPEED_PLANNER_ENABLE
-#define RUN_SPEED_PLANNER_ENABLE (1)
 #endif
 
 // 0: 保留原示波器通道；1: 速度规划观测，优先于模糊 PD 调试模式。

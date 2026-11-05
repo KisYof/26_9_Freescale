@@ -59,11 +59,7 @@ static const uint16 ui_image_period[] = {500U, 200U, 100U};
 static const double ui_gain_step[] = {0.001, 0.01, 0.1, 1.0};
 static const int16 ui_speed_step[] = {1, 5, 10, 50};
 static const char *ui_titles[] = {"CAMERA / CONTROL", "RUN MONITOR", "LEFT WHEEL PID", "RIGHT WHEEL PID",
-#if RUN_STEER_FUZZY_ENABLE
     "STEER FUZZY PD BASE",
-#else
-    "STEER PID",
-#endif
     "DISPLAY SETTINGS"};
 
 // CPU0 独立保存显示快照；CPU1 写帧或复制期间换帧时丢弃本次刷新。
@@ -199,12 +195,10 @@ static void ui_adjust(int8 direction)
         ui_draft.speed = (int16)(speed_value < 0 ? 0 : (speed_value > RUN_PARAM_SPEED_MAX ? RUN_PARAM_SPEED_MAX : speed_value));
         return;
     }
-#if RUN_STEER_FUZZY_ENABLE
     if (ui_page == UI_STEER && ui_field == 2)
     {
         return;
     }
-#endif
     value = ui_field == 1 ? &g->kp : (ui_field == 2 ? &g->ki : &g->kd);
     *value += direction * ui_gain_step[ui_step];
     if (*value < 0)
@@ -411,13 +405,11 @@ static void ui_draw_values(const run_monitor_t *m)
         ui_text(104, "%c Ki: %.3f", ui_edit && ui_field == 2 ? '>' : ' ', g->ki);
         ui_text(132, "%c Kd: %.3f", ui_edit && ui_field == 3 ? '>' : ' ', g->kd);
         ui_text(160, "%c Step: %.3f / %d cm/s", ui_edit && ui_field == 4 ? '>' : ' ', ui_gain_step[ui_step], ui_speed_step[ui_step]);
-#if RUN_STEER_FUZZY_ENABLE
         if (ui_page == UI_STEER)
         {
             ui_text(188, "Ki locked at zero");
             ui_text(212, "Eff P:%.3f D:%.3f", m->fuzzy_kp, m->fuzzy_kd);
         }
-#endif
         ui_text(240, "%s", ui_notice);
         ui_text(260, ui_edit ? "K2 field/hold apply; K3-/K4+" : "K2 hold edit (IDLE only)");
     }
