@@ -82,6 +82,12 @@ static volatile uint8 run_straight_confirmed = 0;
 static volatile int16 run_curve_risk = 0; // 速度规划专用绝对倾斜风险，不进入方向环
 static uint32 run_curve_risk_x4 = 0;     // Q2 保留小数，下降权重 3/4
 static uint32 run_speed_planner_frame_sequence = 0;
+/* 十字退出/路径恢复限速：连续新帧验证，重复遥测帧不计数。 */
+static uint32 run_recovery_frame_sequence = 0;
+static uint8 run_recovery_pending = 0;
+static uint8 run_recovery_valid_count = 0;
+static int16 run_recovery_limit = 170;
+static int32 run_recovery_mid_error = 0;
 static run_imu_monitor_t run_imu_monitor;
 static volatile uint16 run_imu_age_ms = 65535U;
 #if RUN_IMU_ENABLE
@@ -462,6 +468,11 @@ static void run_enter_state(run_state_enum state)
     run_curve_risk = 0;
     run_curve_risk_x4 = 0;
     run_speed_planner_frame_sequence = 0;
+    run_recovery_frame_sequence = 0;
+    run_recovery_pending = 0;
+    run_recovery_valid_count = 0;
+    run_recovery_limit = 170;
+    run_recovery_mid_error = 0;
     if (RUN_STATE_FAULT == state)
         run_toggle_request = 0;
 }
@@ -623,8 +634,8 @@ static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 u
 {
     // 普通赛道的斜率与速度标定表。
     // 风险上升立即响应，下降沿用新帧缓释；不是额外的远端曲率预测。
-    static const int16 slope_points[] = {0, 120, 150, 300, 500, 800, 1100};
-    static const int16 speed_points[] = {240, 235, 230, 215, 195, 190, 180};
+    static const int16 slope_points[] = {0, 120, 150, 300, 400, 500, 800, 1100};
+    static const int16 speed_points[] = {240, 225, 215, 195, 180, 180, 175, 170};
     int16 limit = speed_points[sizeof(speed_points) / sizeof(speed_points[0]) - 1U];
     int16 slope = run_curve_risk;
     uint8 point;
@@ -677,9 +688,63 @@ static int16 run_calc_safety_speed_limit(const run_vision_struct *vision)
 }
 
 // 综合用户上限、弯道、特殊元素和安全限制；只产生基础目标速度，不操作执行器或 PID。
+// 十字刚退出或控制路径刚恢复时，先确认连续参考，再释放原有速度规划。
+static int16 run_calc_recovery_speed_limit(const run_vision_struct *vision, int16 user_limit)
+{
+    int16 limit;
+    int32 difference;
+
+    // 圆环和斑马线沿用各自控制与停车链路。
+    if (vision->ring_active || vision->zebra)
+    {
+        run_recovery_pending = 0;
+        run_recovery_valid_count = 0;
+        run_recovery_frame_sequence = vision->frame_sequence;
+        return user_limit;
+    }
+    if (!vision->mid_valid || !vision->track_slope_valid || vision->line_lost)
+    {
+        limit = vision->line_lost ? RUN_SPEED_LINE_LOST_LIMIT : RUN_SPEED_UNKNOWN_LIMIT;
+        if (run_planned_speed > 0 && run_planned_speed < limit)
+            limit = run_planned_speed;
+        if (run_recovery_pending && run_recovery_limit < limit)
+            limit = run_recovery_limit;
+        run_recovery_limit = limit;
+        run_recovery_pending = 1;
+        run_recovery_valid_count = 0;
+        run_recovery_frame_sequence = vision->frame_sequence;
+        return user_limit < limit ? user_limit : limit;
+    }
+    if (vision->cross)
+    {
+        if (!run_recovery_pending || run_recovery_limit > 170)
+            run_recovery_limit = 170;
+        run_recovery_pending = 1;
+        run_recovery_valid_count = 0;
+        run_recovery_frame_sequence = vision->frame_sequence;
+        return user_limit;
+    }
+    if (run_recovery_pending && vision->frame_sequence != run_recovery_frame_sequence)
+    {
+        run_recovery_frame_sequence = vision->frame_sequence;
+        difference = vision->mid_error - run_recovery_mid_error;
+        if (run_recovery_valid_count == 0 || difference < -8 || difference > 8)
+            run_recovery_valid_count = 1;
+        else if (run_recovery_valid_count < 3)
+            run_recovery_valid_count++;
+        run_recovery_mid_error = vision->mid_error;
+        if (run_recovery_valid_count >= 3)
+            run_recovery_pending = 0;
+    }
+    if (run_recovery_pending && run_recovery_limit < user_limit)
+        return run_recovery_limit;
+    return user_limit;
+}
+
 static int16 run_speed_planner(const run_vision_struct *vision)
 {
     int16 planned = speed_setting;
+    int16 recovery_limit;
     int32 slope = vision->track_slope;
 
     if (planned > RUN_PARAM_SPEED_MAX)
@@ -690,6 +755,9 @@ static int16 run_speed_planner(const run_vision_struct *vision)
     // 反向/停车命令保留原语义；当前前向赛道规划仅处理正速度。
     if (planned <= 0)
     {
+        run_recovery_pending = 0;
+        run_recovery_valid_count = 0;
+        run_recovery_frame_sequence = vision->frame_sequence;
         run_straight_confirm_count = 0;
         run_straight_confirmed = 0;
         run_speed_planner_frame_sequence = vision->frame_sequence;
@@ -747,7 +815,10 @@ static int16 run_speed_planner(const run_vision_struct *vision)
         // 失效/元素期间不把 risk 清零，不用该帧的低 slope 提前恢复高速。
     }
 
+    recovery_limit = run_calc_recovery_speed_limit(vision, planned);
     run_curve_speed_limit = run_calc_curve_speed_limit(vision, planned);
+    if (recovery_limit < run_curve_speed_limit)
+        run_curve_speed_limit = recovery_limit;
     run_element_speed_limit = run_calc_element_speed_limit(vision);
     run_safety_speed_limit = run_calc_safety_speed_limit(vision);
 
