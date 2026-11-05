@@ -168,7 +168,7 @@ uint8 Half_Ring_Wide_small[LCDH]=
 static const uint8 Vision_ProspectRow[VP_COUNT] =
 {
     27,     // 普通赛道
-    35,     // 十字：看中间
+    40,     // 十字：看中间
     35,     // 斑马线
     30,     // 圆环入口
     47,     // 圆环内部
