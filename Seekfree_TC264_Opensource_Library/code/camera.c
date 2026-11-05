@@ -3082,6 +3082,45 @@ static uint8 Vision_SelectProspectType(void)
 
     return VP_NORMAL;
 }
+// @name  ControlMid_SelectNearbyReference
+// @brief 固定前瞻行无可靠参考时，只在近侧两行内寻找当前帧连续白路。
+// @note  必须连续三行、每行横移不超过4像素，平均行内不得跨黑区；不跨帧造线。
+static uint8 ControlMid_SelectNearbyReference(int preferred_row, int *selected_row,
+                                            int *selected_value)
+{
+    int row, x, a, b, c, low, high;
+    for (row = preferred_row + 1; row <= preferred_row + 2 && row < LCDH - 1; row++)
+    {
+        if (row < 1)
+            continue;
+        a = ControlMidLine[row - 1];
+        b = ControlMidLine[row];
+        c = ControlMidLine[row + 1];
+        if (a <= 2 || a >= LCDW - 2 || b <= 2 || b >= LCDW - 2 ||
+            c <= 2 || c >= LCDW - 2)
+            continue;
+        if (b - a < -4 || b - a > 4 || c - b < -4 || c - b > 4)
+            continue;
+        if (Pixle[row - 1][a] != 255 || Pixle[row][b] != 255 ||
+            Pixle[row + 1][c] != 255)
+            continue;
+        low = a < b ? a : b;
+        if (c < low) low = c;
+        high = a > b ? a : b;
+        if (c > high) high = c;
+        for (x = low; x <= high && Pixle[row][x] == 255; x++)
+        {
+            /* 三行中心在当前候选行必须属于同一连续白段。 */
+        }
+        if (x <= high)
+            continue;
+        *selected_row = row;
+        *selected_value = (a + b + c) / 3;
+        return 1;
+    }
+    return 0;
+}
+
 void ControlMid_Update(void)
 {
     int i;
@@ -3095,6 +3134,8 @@ void ControlMid_Update(void)
     int wide;
 
     uint8 ring_active;
+    uint8 reference_supported;
+    int nearby_row, nearby_value;
 
     ControlMidValid = 0;
     ControlMidError = 0;
@@ -3133,6 +3174,10 @@ void ControlMid_Update(void)
         {
             ControlMidLine[i] = -1;
         }
+        /* 普通道路和十字必须有当前白路支撑，黑区中线不得参与控制。 */
+        if (!ring_active && !ImageFlag.Zebra_Flag && ControlMidLine[i] >= 0 &&
+            Pixle[i][ControlMidLine[i]] != 255)
+            ControlMidLine[i] = -1;
     }
 
     /* 2. 根据元素状态选择控制行 */
@@ -3196,7 +3241,17 @@ void ControlMid_Update(void)
         }
     }
 
-    if (cnt > 0)
+    /* 原固定行优先；失效时只接受近侧连续三行支持的真实白路。 */
+    reference_supported = cnt >= 2 && Pixle[ControlProspectRow][sum / cnt] == 255;
+    if (!ring_active && !ImageFlag.Zebra_Flag && !reference_supported &&
+        ControlMid_SelectNearbyReference((int)ControlProspectRow, &nearby_row, &nearby_value))
+    {
+        ControlProspectRow = (uint8)nearby_row;
+        sum = nearby_value;
+        cnt = 1;
+        reference_supported = 1;
+    }
+    if (cnt > 0 && (ring_active || ImageFlag.Zebra_Flag || reference_supported))
     {
         ControlMidValue = sum / cnt;
         ControlMidError = ImageSensorMid - ControlMidValue;
