@@ -1788,6 +1788,14 @@ void Search_Border_OTSU(uint8 imageInput[LCDH][LCDW], uint8 Row, uint8 Col, uint
 #define CROSS_EXT_WIDTH_MIN     20.0f              // 补线后每行允许的最小道路宽度，单位：像素
 #define CROSS_EXT_WIDTH_MAX     ((float)(LCDW - 5)) // 补线后每行允许的最大道路宽度，单位：像素
 
+
+#define CROSS_EXT_RECOVER_BLACK  4      /* 重搜时忽略较短黑点 */
+#define CROSS_EXT_RECOVER_AGREE  5      /* 两种重搜结果的允许列差 */
+#define CROSS_EXT_LEFT           0
+#define CROSS_EXT_RIGHT          1
+#define CROSS_EXT_RECOVER_LEFT   2
+#define CROSS_EXT_RECOVER_RIGHT  3
+
 typedef struct
 {
     int far_row;
@@ -1797,7 +1805,7 @@ typedef struct
 } CrossExtFit;
 
 /* Return a measured transition, normalized to its white-side pixel. */
-static uint8 CrossExt_GetPoint(int side, int y, int *point_x)
+static uint8 CrossExt_GetMeasuredPoint(int side, int y, int *point_x)
 {
     int x;
     uint8 found;
@@ -1832,11 +1840,57 @@ static uint8 CrossExt_GetPoint(int side, int y, int *point_x)
     return 1;
 }
 
+/* 重搜从已验证的另一侧白点出发，遇到第一段连续黑区就停止。 */
+static uint8 CrossExt_GetPoint(int source, int y, int *point_x)
+{
+    int anchor, x, step, distance, dark_run = 0;
+    int width, min_width, max_width;
+
+    if (source == CROSS_EXT_LEFT || source == CROSS_EXT_RIGHT)
+        return CrossExt_GetMeasuredPoint(source, y, point_x);
+
+    if (!CrossExt_GetMeasuredPoint(source == CROSS_EXT_RECOVER_RIGHT ?
+                                  CROSS_EXT_LEFT : CROSS_EXT_RIGHT, y, &anchor))
+        return 0;
+
+    step = source == CROSS_EXT_RECOVER_RIGHT ? 1 : -1;
+    width = 2 * Half_Road_Wide[y];
+    min_width = width / 2;
+    if (min_width < CROSS_EXT_WIDTH_MIN)
+        min_width = (int)CROSS_EXT_WIDTH_MIN;
+    max_width = width + width / 2;
+
+    for (distance = 1; distance <= max_width + CROSS_EXT_RECOVER_BLACK; distance++)
+    {
+        x = anchor + step * distance;
+        if (x <= 0 || x >= LCDW - 1)
+            break;
+
+        if (Pixle[y][x] == 255)
+        {
+            dark_run = 0;
+            continue;
+        }
+
+        if (++dark_run >= CROSS_EXT_RECOVER_BLACK)
+        {
+            width = distance - dark_run;
+            x = anchor + step * width;
+            if (width < min_width || width > max_width ||
+                x < CROSS_EXT_EDGE_MIN || x > CROSS_EXT_EDGE_MAX)
+                return 0;
+            *point_x = x;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Fit x = k*y + b using every measured row in the inclusive interval. */
 static uint8 CrossExt_FitRange(int side, int far_row, int near_row,
                                CrossExtFit *fit)
 {
-    int y, x, n = 0;
+    int y, x, n = 0, previous_x = 0;
     float sum_y = 0.0f, sum_x = 0.0f;
     float sum_yy = 0.0f, sum_yx = 0.0f;
     float denominator, k, b, error, error_sum = 0.0f;
@@ -1845,6 +1899,10 @@ static uint8 CrossExt_FitRange(int side, int far_row, int near_row,
     {
         if (!CrossExt_GetPoint(side, y, &x))
             return 0;
+        if (n > 0 && (x - previous_x > CROSS_EXT_STEP_MAX ||
+                      previous_x - x > CROSS_EXT_STEP_MAX))
+            return 0;
+        previous_x = x;
         sum_y += (float)y;
         sum_x += (float)x;
         sum_yy += (float)y * (float)y;
@@ -1929,52 +1987,113 @@ static uint8 CrossExt_FindUpper(int side, CrossExtFit *fit)
     return 0;
 }
 
-void Get_ExtensionLine(void)
+/* Validate a complete candidate without changing the original scan. */
+static uint8 CrossExt_ValidatePair(const CrossExtFit *left_fit,
+                                  const CrossExtFit *right_fit, int *start_row)
 {
-    CrossExtFit left_fit, right_fit;
     int first_row, overlap_end, row_difference, prospect;
     int y, left, right;
     float left_x, right_x, width;
+
+    row_difference = left_fit->near_row - right_fit->near_row;
+    if (row_difference < 0)
+        row_difference = -row_difference;
+    if (row_difference > CROSS_EXT_ROW_GAP_MAX)
+        return 0;
+
+    first_row = left_fit->far_row > right_fit->far_row ?
+                left_fit->far_row : right_fit->far_row;
+    overlap_end = left_fit->near_row < right_fit->near_row ?
+                  left_fit->near_row : right_fit->near_row;
+    if (first_row > overlap_end)
+        return 0;
+
+    prospect = (int)Vision_ProspectRow[VP_CROSS];
+    if (prospect - 1 < first_row || prospect + 1 > LCDH - 2)
+        return 0;
+
+    /* Validate the complete float and integer output before any writes. */
+    for (y = first_row; y <= LCDH - 2; y++)
+    {
+        left_x = left_fit->k * (float)y + left_fit->b;
+        right_x = right_fit->k * (float)y + right_fit->b;
+        width = right_x - left_x;
+        if (!(left_x >= CROSS_EXT_EDGE_MIN && left_x <= CROSS_EXT_EDGE_MAX &&
+              right_x >= CROSS_EXT_EDGE_MIN && right_x <= CROSS_EXT_EDGE_MAX &&
+              width >= CROSS_EXT_WIDTH_MIN && width <= CROSS_EXT_WIDTH_MAX))
+            return 0;
+        left = (int)(left_x + 0.5f);
+        right = (int)(right_x + 0.5f);
+        if (right <= left || right - left < 20 || right - left > LCDW - 5)
+            return 0;
+
+    }
+
+    *start_row = first_row;
+    return 1;
+}
+
+static uint8 CrossExt_FitsAgree(const CrossExtFit *a, const CrossExtFit *b, int y)
+{
+    float difference = (a->k - b->k) * (float)y + a->b - b->b;
+
+    return difference >= -CROSS_EXT_RECOVER_AGREE &&
+           difference <= CROSS_EXT_RECOVER_AGREE;
+}
+
+void Get_ExtensionLine(void)
+{
+    CrossExtFit left_fit, right_fit, recovered_left, recovered_right;
+    uint8 left_found, right_found, from_left, from_right;
+    int first_row, start_from_left, start_from_right;
+    int y, left, right, prospect;
 
     if (ImageFlag.Cross_Flag != 1 || ImageFlag.image_element_rings != 0 ||
         ImageFlag.Zebra_Flag != 0)
         return;
 
-    if (!CrossExt_FindUpper(0, &left_fit) ||
-        !CrossExt_FindUpper(1, &right_fit))
-        return;
+    left_found = CrossExt_FindUpper(CROSS_EXT_LEFT, &left_fit);
+    right_found = CrossExt_FindUpper(CROSS_EXT_RIGHT, &right_fit);
 
-    row_difference = left_fit.near_row - right_fit.near_row;
-    if (row_difference < 0)
-        row_difference = -row_difference;
-    if (row_difference > CROSS_EXT_ROW_GAP_MAX)
-        return;
-
-    first_row = left_fit.far_row > right_fit.far_row ?
-                left_fit.far_row : right_fit.far_row;
-    overlap_end = left_fit.near_row < right_fit.near_row ?
-                  left_fit.near_row : right_fit.near_row;
-    if (first_row > overlap_end)
-        return;
-
-    prospect = (int)Vision_ProspectRow[VP_CROSS];
-    if (prospect - 1 < first_row || prospect + 1 > LCDH - 2)
-        return;
-
-    /* Validate the complete float and integer output before any writes. */
-    for (y = first_row; y <= LCDH - 2; y++)
+    if (!(left_found && right_found &&
+          CrossExt_ValidatePair(&left_fit, &right_fit, &first_row)))
     {
-        left_x = left_fit.k * (float)y + left_fit.b;
-        right_x = right_fit.k * (float)y + right_fit.b;
-        width = right_x - left_x;
-        if (!(left_x >= CROSS_EXT_EDGE_MIN && left_x <= CROSS_EXT_EDGE_MAX &&
-              right_x >= CROSS_EXT_EDGE_MIN && right_x <= CROSS_EXT_EDGE_MAX &&
-              width >= CROSS_EXT_WIDTH_MIN && width <= CROSS_EXT_WIDTH_MAX))
+        /* 两个方向独立重搜，使用锚点拟合区相同的行。 */
+        from_left = left_found &&
+                    CrossExt_FitRange(CROSS_EXT_RECOVER_RIGHT, left_fit.far_row,
+                                      left_fit.near_row, &recovered_right) &&
+                    CrossExt_ValidatePair(&left_fit, &recovered_right,
+                                          &start_from_left);
+        from_right = right_found &&
+                     CrossExt_FitRange(CROSS_EXT_RECOVER_LEFT, right_fit.far_row,
+                                       right_fit.near_row, &recovered_left) &&
+                     CrossExt_ValidatePair(&recovered_left, &right_fit,
+                                           &start_from_right);
+
+        if (!from_left && !from_right)
             return;
-        left = (int)(left_x + 0.5f);
-        right = (int)(right_x + 0.5f);
-        if (right <= left || right - left < 20 || right - left > LCDW - 5)
-            return;
+
+        /* 两边各自找到不同白路时，当前帧缺少可确定的配对。 */
+        if (from_left && from_right)
+        {
+            prospect = (int)Vision_ProspectRow[VP_CROSS];
+            if (!CrossExt_FitsAgree(&left_fit, &recovered_left, prospect) ||
+                !CrossExt_FitsAgree(&right_fit, &recovered_right, prospect) ||
+                !CrossExt_FitsAgree(&left_fit, &recovered_left, LCDH - 2) ||
+                !CrossExt_FitsAgree(&right_fit, &recovered_right, LCDH - 2))
+                return;
+        }
+
+        if (from_left)
+        {
+            right_fit = recovered_right;
+            first_row = start_from_left;
+        }
+        else
+        {
+            left_fit = recovered_left;
+            first_row = start_from_right;
+        }
     }
 
     /* Commit both sides together; retain original measured T/W/H flags. */
