@@ -18,23 +18,23 @@
 #define RUN_STALL_CONFIRM_TICKS (150U) // 速度任务计数：堵转条件连续成立 300ms 才确认
 #define RUN_STALL_TARGET_MIN (20)      // 目标速度大于 20cm/s 才谈堵转
 #define RUN_STALL_SPEED_MAX (5)        // 实际速度绝对值小于 5cm/s 视为停转
-#define RUN_SPEED_ACCEL_STEP (15)       // 10ms 加速步长，保守初值，需实车标定
+#define RUN_SPEED_ACCEL_STEP (10)       // 10ms 加速步长，保守初值，需实车标定
 #define RUN_SPEED_DECEL_STEP (30)       // 10ms 减速步长，必须大于加速步长，需实车标定
-#define SPEED_MID (280)                // 调试层默认目标速度
-#define STEER_OUTPUT_MAP_SCALE (0.25)  // 转向输出换算成舵机角的缩放系数
+#define SPEED_MID (250)                // 调试层默认目标速度
+#define STEER_OUTPUT_MAP_SCALE (0.3)  // 转向输出换算成舵机角的缩放系数
 
 // Track_Slope_x1000 是弯道趋势而非严格几何曲率，速度标定表见 run_calc_curve_speed_limit。
 #define RUN_STRAIGHT_SLOPE_THRESHOLD (120) // 低风险直道许可阈值
-#define RUN_SPEED_UNKNOWN_LIMIT (270)      // slope 无效时的保守速度上限
-#define RUN_SPEED_CROSS_LIMIT (220)        // 十字速度上限
-#define RUN_SPEED_RING_LIMIT (220)         // 环岛速度上限
-#define RUN_SPEED_LINE_LOST_LIMIT (180)    // 丢线时的安全速度上限
+#define RUN_SPEED_UNKNOWN_LIMIT (150)      // slope 无效时的保守速度上限
+#define RUN_SPEED_CROSS_LIMIT (180)        // 十字速度上限
+#define RUN_SPEED_RING_LIMIT (180)         // 环岛速度上限
+#define RUN_SPEED_LINE_LOST_LIMIT (120)    // 丢线时的安全速度上限
 
 #define RUN_STRAIGHT_CONFIRM_FRAMES (8U)   // 至少八个有效新帧，不按调度次数累计
 #define RUN_STRAIGHT_REVOKE_SLOPE (120)
 #define RUN_STRAIGHT_MID_CONFIRM (10)
 #define RUN_STRAIGHT_MID_REVOKE (10)
-#define RUN_SPEED_UNCONFIRMED_LIMIT (270)
+#define RUN_SPEED_UNCONFIRMED_LIMIT (240)
 
 // 原始速度与滤波后速度：只在 2ms 速度任务里更新
 volatile int16 raw_left = 0;
@@ -261,8 +261,8 @@ void run_init(void)
     hardware_init();
     memset(&run_imu_monitor, 0, sizeof(run_imu_monitor));
     run_imu_age_ms = 65535U;
-    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 30.3, 0.07, 0.0, 4000, -4000, 0, 0);
-    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 30.3, 0.07, 0.0, 4000, -4000, 0, 0);
+    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 40.3, 0.07, 0.0, 4000, -4000, 0, 0);
+    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 40.3, 0.07, 0.0, 4000, -4000, 0, 0);
     steer_base_gains.kp = 0.80;
     steer_base_gains.ki = 0.0;
     steer_base_gains.kd = 0.22;
@@ -635,7 +635,7 @@ static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 u
     // 普通赛道的斜率与速度标定表。
     // 风险上升立即响应，下降沿用新帧缓释；不是额外的远端曲率预测。
     static const int16 slope_points[] = {0, 120, 150, 300, 400, 500, 800, 1100};
-    static const int16 speed_points[] = {270, 265, 260, 250, 240, 225, 200, 190};
+    static const int16 speed_points[] = {240, 225, 215, 195, 180, 180, 175, 170};
     int16 limit = speed_points[sizeof(speed_points) / sizeof(speed_points[0]) - 1U];
     int16 slope = run_curve_risk;
     uint8 point;
@@ -650,7 +650,7 @@ static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 u
     }
     // 有效特殊元素不套用普通中线斜率；由独立元素限速约束，不能申请高速。
     if (vision->cross || vision->ring_active || vision->zebra)
-        return (user_limit < 270) ? user_limit : 270; // 特殊元素沿用完赛版，缓弯提速不带动元素上限。
+        return (user_limit < 185) ? user_limit : 185; // 特殊元素沿用完赛版，缓弯提速不带动元素上限。
 
     for (point = 1; point < (uint8)(sizeof(slope_points) / sizeof(slope_points[0])); point++)
     {
