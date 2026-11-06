@@ -2435,88 +2435,78 @@ void Block_Sub_Judge(uint8 ystart,uint8 yend)
     }
 }
 
-void Element_Judgement_SmallBlock_L()
-//左路障判断：先判断对侧边线是否是直线，如果是直线，再判断赛道是否明显变窄，如果变窄，则说明左侧有路障
+//左/右路障判断：先判断对侧边线是否是直线，如果是直线，再判断赛道是否明显变窄，如果变窄，则说明左/右侧有路障
+//当前版本先统一统计变窄行数，再分别检查两侧直线度。
+static uint8 Element_Judgement_SmallBlock(void)
 {
-    uint8 Block_num=0;
-    if(ImageFlag.Ramp==1||ImageFlag.Zebra_Flag==1||ImageFlag.straight_long==1||ImageFlag.image_element_rings!=0)
+    uint8 hits = 0;
+    int first_row = clip(ImageStatus.OFFLine + 1, 20, LCDH - 1);
+
+    if (ImageFlag.Ramp || ImageFlag.Zebra_Flag || ImageFlag.Cross_Flag ||
+        ImageFlag.straight_long || ImageFlag.image_element_rings ||
+        first_row > 48)
     {
-        return;
+        return 0;
     }
-    if(Straight_Judge(2,20,69)<3)//右是直线
+
+    //检查第20–48行。
+    for (int y = first_row; y <= 48; y++)
     {
-        for(int ysite=20;ysite<49;ysite++)//66-77
+        int width = ImageDeal[y].RightBorder - ImageDeal[y].LeftBorder;
+
+        //赛道明显变窄
+        if (ImageDeal[y].IsLeftFind == 'T' && ImageDeal[y].IsRightFind == 'T' &&
+            width > 30 && All_Road_Wide[y] - width > 10)
         {
-            if((All_Road_Wide[ysite]-(ImageDeal[ysite].RightBorder-ImageDeal[ysite].LeftBorder))>10
-                    &&(ImageDeal[ysite].RightBorder-ImageDeal[ysite].LeftBorder)>30)//赛道明显变窄
-            {
-                Block_num++;
-            }
-            if(Block_num>10)
-            {
-                ImageFlag.SmallBlock=2;//左路障：2
-                break;
-            }
-        }
-        if(Block_num<=10)
-        {
-            ImageFlag.SmallBlock=0;
+            hits++;
         }
     }
+
+    if (hits < 11)
+    {
+        return 0;
+    }
+
+    //左是直线
+    uint8 right_hit = Straight_Judge(1, first_row, LCDH - 1) < 3.0f;
+    //右是直线
+    uint8 left_hit = Straight_Judge(2, first_row, LCDH - 1) < 3.0f;
+
+    if (left_hit == right_hit)
+    {
+        return 0;
+    }
+
+    //右路障：1；左路障：2
+    return right_hit ? 1 : 2;
 }
 
-void Element_Judgement_SmallBlock_R()
-//右路障判断：先判断对侧边线是否是直线，如果是直线，再判断赛道是否明显变窄，如果变窄，则说明右侧有路障
-{
-    uint8 Block_num=0;
-    if(ImageFlag.Ramp==1||ImageFlag.Zebra_Flag==1||ImageFlag.straight_long==1||ImageFlag.image_element_rings!=0)
-    {
-        return;
-    }
-    if(Straight_Judge(1,20,69)<3)//左是直线
-    {
-        for(int ysite=20;ysite<49;ysite++)//66-77
-        {
-            if((All_Road_Wide[ysite]-(ImageDeal[ysite].RightBorder-ImageDeal[ysite].LeftBorder))>10
-                    &&(ImageDeal[ysite].RightBorder-ImageDeal[ysite].LeftBorder)>30)//赛道明显变窄
-            {
-                Block_num++;
-            }
-            if(Block_num>10)
-            {
-                ImageFlag.SmallBlock=1;//右路障：1
-                break;
-            }
-        }
-        if(Block_num<=10)
-        {
-            ImageFlag.SmallBlock=0;
-        }
-    }
-}
 //------------------------路障中线处理----------------------------
-void Element_Handle_SmallBlock()
+static void Element_Handle_SmallBlock(void)
 {
-    if(ImageFlag.SmallBlock==2)//左
+    //修改第20–64行的中线Center（现在两端渐变到0）。
+    const int first_row = 20;
+    const int last_row = 64;
+    const int taper_rows = 5;
+    const int max_offset = 10;
+    //左侧有障碍就给中线+10，让目标往右移。
+    //右侧有障碍就给中线-10，让目标往左移。
+    //当前版本中段保留10像素最大偏移。
+    const int direction = ImageFlag.SmallBlock == 2 ? 1 : -1;
+
+    for (int y = first_row + 1; y < last_row; y++)
     {
-        for(int ysite=20;ysite<65;ysite++)
-        //修改第20–64行的中线Center
-        //左侧有障碍就给中线+10，让目标往右移。
+        int taper = clip(y - first_row, 0, taper_rows);
+        int distance_to_end = last_row - y;
+
+        if (distance_to_end < taper)
         {
-            ImageDeal[ysite].Center=ImageDeal[ysite].Center+10;
-            LimitL(ImageDeal[ysite].Center);
-            LimitH(ImageDeal[ysite].Center);
+            taper = distance_to_end;
         }
-    }
-    if(ImageFlag.SmallBlock==1)//右
-    {
-        for(int ysite=20;ysite<65;ysite++)
-        //右侧有障碍就给中线-10，让目标往左移
-        {
-            ImageDeal[ysite].Center=ImageDeal[ysite].Center-10;
-            LimitL(ImageDeal[ysite].Center);
-            LimitH(ImageDeal[ysite].Center);
-        }
+
+        ImageDeal[y].Center += direction * max_offset * taper / taper_rows;
+        LimitL(ImageDeal[y].Center);
+        LimitH(ImageDeal[y].Center);
     }
 }
 
@@ -3442,8 +3432,7 @@ void Scan_Element(void)
 
     Straight_long_judge();
 
-    Element_Judgement_SmallBlock_R();
-    Element_Judgement_SmallBlock_L();
+    ImageFlag.SmallBlock = Element_Judgement_SmallBlock();
 }
 /*元素处理函数*/
 void Element_Handle()
