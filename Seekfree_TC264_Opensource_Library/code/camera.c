@@ -96,7 +96,7 @@ int Less_Big_Small_Num;                                         //判断大小圆环时
 uint16 circle_num=0;                                            //判断圆环大小的计数器
 uint16 position=37;//正15 反38                                   //大环判断的阈值
 float Big_Small_Help_Gradient;                                  //大小圆环的辅助判断斜率
-int Small_Rings_HalfWide_Offset=-20;                            //小环半宽偏移
+int Small_Rings_HalfWide_Offset=20;                            //小环半宽偏移
 int right_ring_num=0;
 int left_ring_num=0;
 
@@ -2398,6 +2398,117 @@ void Element_Handle_Zebra()
         }
     }
 }
+//--------------------------------------------------------------
+//  @name          
+//  @brief         元素判断: 路障判断
+//  @parameter      void
+//  @note
+//  @time
+//  @Author
+//  Sample usage:
+//--------------------------------------------------------------
+uint8 small_block_ystart=0;
+void Block_Sub_Judge(uint8 ystart,uint8 yend)
+{
+    small_block_ystart=0;
+    uint8 net=0;
+    for(int Ysite=ystart;Ysite>yend;Ysite--)
+    {
+        for (int Xsite =ImageDeal[Ysite].LeftBoundary+1 ; Xsite < ImageDeal[Ysite].RightBoundary; Xsite++)
+        {
+            if(Pixle[Ysite][Xsite] == 0)
+            {
+                net++;
+                if(net>6)
+                {
+                    small_block_ystart=Ysite;
+                    Ysite=yend;
+                    //找到这行的路障边边的xsite
+                    break;
+                }
+            }
+            else
+            {
+                net=0;
+            }
+        }
+    }
+}
+
+//左/右路障判断：先判断对侧边线是否是直线，如果是直线，再判断赛道是否明显变窄，如果变窄，则说明左/右侧有路障
+//当前版本先统一统计变窄行数，再分别检查两侧直线度。
+static uint8 Element_Judgement_SmallBlock(void)
+{
+    uint8 hits = 0;
+    int first_row = clip(ImageStatus.OFFLine + 1, 20, LCDH - 1);
+
+    if (ImageFlag.Ramp || ImageFlag.Zebra_Flag || ImageFlag.Cross_Flag ||
+        ImageFlag.straight_long || ImageFlag.image_element_rings ||
+        first_row > 48)
+    {
+        return 0;
+    }
+
+    //检查第20–48行。
+    for (int y = first_row; y <= 48; y++)
+    {
+        int width = ImageDeal[y].RightBorder - ImageDeal[y].LeftBorder;
+
+        //赛道明显变窄
+        if (ImageDeal[y].IsLeftFind == 'T' && ImageDeal[y].IsRightFind == 'T' &&
+            width > 30 && All_Road_Wide[y] - width > 10)
+        {
+            hits++;
+        }
+    }
+
+    if (hits < 11)
+    {
+        return 0;
+    }
+
+    //左是直线
+    uint8 right_hit = Straight_Judge(1, first_row, LCDH - 1) < 3.0f;
+    //右是直线
+    uint8 left_hit = Straight_Judge(2, first_row, LCDH - 1) < 3.0f;
+
+    if (left_hit == right_hit)
+    {
+        return 0;
+    }
+
+    //右路障：1；左路障：2
+    return right_hit ? 1 : 2;
+}
+
+//------------------------路障中线处理----------------------------
+static void Element_Handle_SmallBlock(void)
+{
+    //修改第20–64行的中线Center（现在两端渐变到0）。
+    const int first_row = 20;
+    const int last_row = 64;
+    const int taper_rows = 5;
+    const int max_offset = 10;
+    //左侧有障碍就给中线+10，让目标往右移。
+    //右侧有障碍就给中线-10，让目标往左移。
+    //当前版本中段保留10像素最大偏移。
+    const int direction = ImageFlag.SmallBlock == 2 ? 1 : -1;
+
+    for (int y = first_row + 1; y < last_row; y++)
+    {
+        int taper = clip(y - first_row, 0, taper_rows);
+        int distance_to_end = last_row - y;
+
+        if (distance_to_end < taper)
+        {
+            taper = distance_to_end;
+        }
+
+        ImageDeal[y].Center += direction * max_offset * taper / taper_rows;
+        LimitL(ImageDeal[y].Center);
+        LimitH(ImageDeal[y].Center);
+    }
+}
 
 //--------------------------------------------------------------
 //  @name          Element_Judgement_Cross()
@@ -2632,7 +2743,7 @@ void Element_Handle_Left_Rings()
         ImageFlag.image_element_rings_flag = 5;//左边线丢失数明显减少，车已经进入环岛区域，状态5
     }
 
-            Small_Rings_HalfWide_Offset=30;
+            Small_Rings_HalfWide_Offset=5;
     //进环
     if(ImageFlag.image_element_rings_flag == 5 && ImageStatus.Miss_Right_lines>15)//
     {
@@ -2850,7 +2961,7 @@ void Element_Handle_Right_Rings()
     //大小圆环判断
     if(ImageFlag.image_element_rings_flag == 5)
     {
-        Small_Rings_HalfWide_Offset=30;
+        Small_Rings_HalfWide_Offset=5;
     }
 //    进环
     if(ImageFlag.image_element_rings_flag == 5 && ImageStatus.Miss_Left_lines>15)
@@ -3315,11 +3426,13 @@ void Scan_Element(void)
     Element_Judgment_Zebra();
 
     Element_Judgement_Left_Rings();
-    Element_Judgment_Right_Rings();
+    Element_Judgment_Right_Rings();  
 
     Element_Judgement_Cross();
 
     Straight_long_judge();
+
+    ImageFlag.SmallBlock = Element_Judgement_SmallBlock();
 }
 /*元素处理函数*/
 void Element_Handle()
@@ -3342,6 +3455,15 @@ void Element_Handle()
     {
         Element_Handle_Left_Rings();
     }
+
+    if (!ImageFlag.Cross_Flag &&
+    !ImageFlag.Zebra_Flag &&
+    !ImageFlag.image_element_rings &&
+    !ImageFlag.Ramp &&
+    (ImageFlag.SmallBlock == 1 || ImageFlag.SmallBlock == 2))//1：右障碍物，2：左障碍物
+    {
+        Element_Handle_SmallBlock();
+    }  
 
 
     if(ImageFlag.Cross_Flag==1)
