@@ -67,7 +67,7 @@ void hardware_init(void)
 // 左轮编码器安装方向与右轮相反，取负号后统一为“正数=前进”。
 void hardware_sample_2ms(hardware_feedback_t *feedback)
 {
-    feedback->raw_left_speed = CALC_LINE_SPEED_CM_S(-encoder_get_count(ENCODER_1));
+    feedback->raw_left_speed = CALC_LINE_SPEED_CM_S(encoder_get_count(ENCODER_1));
     encoder_clear_count(ENCODER_1);
 
     feedback->raw_right_speed = CALC_LINE_SPEED_CM_S(-encoder_get_count(ENCODER_2));
