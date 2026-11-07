@@ -26,8 +26,8 @@
 // Track_Slope_x1000 是弯道趋势而非严格几何曲率，速度标定表见 run_calc_curve_speed_limit。
 #define RUN_STRAIGHT_SLOPE_THRESHOLD (350) // 低风险直道许可阈值
 #define RUN_SPEED_UNKNOWN_LIMIT (250)      // slope 无效时的保守速度上限
-#define RUN_SPEED_CROSS_LIMIT (230)        // 十字速度上限
-#define RUN_SPEED_RING_LIMIT (220)         // 环岛速度上限
+#define RUN_SPEED_CROSS_LIMIT (340)        // 十字速度上限
+#define RUN_SPEED_RING_LIMIT (240)         // 环岛速度上限
 #define RUN_SPEED_LINE_LOST_LIMIT (210)    // 丢线时的安全速度上限
 
 #define RUN_STRAIGHT_CONFIRM_FRAMES (8U)   // 至少八个有效新帧，不按调度次数累计
@@ -97,10 +97,18 @@ static uint8 run_imu_tick_count = 0;
 static volatile uint8 run_imu_sample_pending = 0;
 #endif
 static volatile uint8 run_ready = 0;
-static volatile uint8 run_toggle_request = 0;
+typedef enum
+{
+    RUN_TOGGLE_NONE = 0,
+    RUN_TOGGLE_TRACK,
+    RUN_TOGGLE_SPEED_TEST
+} run_toggle_enum;
+static volatile run_toggle_enum run_toggle_request = RUN_TOGGLE_NONE;
 static uint8 run_start_pending = 0;     // KEY1 请求后等待 CPU1 完成原有复位接口
 static uint16 run_start_wait_ticks = 0; // 独立复位等待计时，不被持续来帧清零
 static uint32 run_start_frame_sequence = 0;
+static uint8 run_speed_test_active = 0;
+static int16 run_speed_test_target = 0; // 检测单独设速，沿用当前左右轮 PID 参数
 
 // 左右轮使用增量式 PID，转向使用模糊 PD；方向基准参数独立保存。
 static PID_Controller_t pid_left;
@@ -271,7 +279,8 @@ void run_init(void)
     run_init_fuzzy_direction();
     run_reset_speed_feedback();
     run_ready = 0;
-    run_toggle_request = 0;
+    run_toggle_request = RUN_TOGGLE_NONE;
+    run_speed_test_target = 0;
     run_enter_state(RUN_STATE_IDLE);
     run_ui_init();
 }
@@ -280,7 +289,7 @@ void run_init(void)
 // 先开放控制调度并绘制首屏，再初始化通信，网络等待不阻塞控制中断。
 static void run_start_runtime(void)
 {
-    run_toggle_request = 0;
+    run_toggle_request = RUN_TOGGLE_NONE;
     run_ready = 1;
     // 屏幕/摄像头和双核同步完成后再建立 SPI0，避免后续启动阶段覆盖采样状态。
     memset(&run_imu_monitor, 0, sizeof(run_imu_monitor));
@@ -312,12 +321,34 @@ void run_while(void)
 }
 
 // 只投递事件；运行状态和执行器输出仍由控制中断决定。
-void run_request_toggle(void)
+static void run_post_toggle(run_toggle_enum request)
 {
     uint32 interrupt_state = interrupt_global_disable();
     if (run_ready && RUN_STATE_FAULT != run_status.state)
     {
-        run_toggle_request = 1;
+        run_toggle_request = request;
+    }
+    interrupt_global_enable(interrupt_state);
+}
+
+void run_request_toggle(void)
+{
+    run_post_toggle(RUN_TOGGLE_TRACK);
+}
+
+void run_request_speed_test_toggle(void)
+{
+    run_post_toggle(RUN_TOGGLE_SPEED_TEST);
+}
+
+// 与启停请求共用临界区，启动后保持本次检测的目标速度。
+void run_adjust_speed_test_target(int16 delta)
+{
+    uint32 interrupt_state = interrupt_global_disable();
+    if (RUN_STATE_IDLE == run_status.state && !run_start_pending && !run_toggle_request)
+    {
+        int32 target = (int32)run_speed_test_target + delta;
+        run_speed_test_target = (int16)(target < 0 ? 0 : (target > RUN_PARAM_SPEED_MAX ? RUN_PARAM_SPEED_MAX : target));
     }
     interrupt_global_enable(interrupt_state);
 }
@@ -410,6 +441,8 @@ void run_get_monitor(run_monitor_t *monitor)
     monitor->status = run_status;
     monitor->ready = run_ready;
     monitor->start_pending = run_start_pending;
+    monitor->speed_test_active = run_speed_test_active;
+    monitor->speed_test_target = run_speed_test_target;
     monitor->frame_sequence = run_vision.frame_sequence;
     monitor->vision_age_ms = run_vision_ticks > 6553U ? 65530U : run_vision_ticks * 10U;
     monitor->mid_valid = run_vision.mid_valid;
@@ -453,6 +486,7 @@ static void run_enter_state(run_state_enum state)
 {
     run_status.state = state;
     run_start_pending = 0;
+    run_speed_test_active = 0;
     run_state_ticks = 0;
     run_left_stall_ticks = 0;
     run_right_stall_ticks = 0;
@@ -476,10 +510,10 @@ static void run_enter_state(run_state_enum state)
     run_recovery_frame_sequence = 0;
     run_recovery_pending = 0;
     run_recovery_valid_count = 0;
-    // run_recovery_limit = 170;
+    run_recovery_limit = 170;
     run_recovery_mid_error = 0;
     if (RUN_STATE_FAULT == state)
-        run_toggle_request = 0;
+        run_toggle_request = RUN_TOGGLE_NONE;
 }
 
 // 记录故障位与现场数据（目标/实际/PWM），随后锁进故障状态。
@@ -714,23 +748,23 @@ static int16 run_calc_recovery_speed_limit(const run_vision_struct *vision, int1
         limit = vision->line_lost ? RUN_SPEED_LINE_LOST_LIMIT : RUN_SPEED_UNKNOWN_LIMIT;
         if (run_planned_speed > 0 && run_planned_speed < limit)
             limit = run_planned_speed;
-        // if (run_recovery_pending && run_recovery_limit < limit)
-        //     limit = run_recovery_limit;
-        // run_recovery_limit = limit;
+        if (run_recovery_pending && run_recovery_limit < limit)
+            limit = run_recovery_limit;
+        run_recovery_limit = limit;
         run_recovery_pending = 1;
         run_recovery_valid_count = 0;
         run_recovery_frame_sequence = vision->frame_sequence;
         return user_limit < limit ? user_limit : limit;
     }
-    // if (vision->cross)
-    // {
-    //     if (!run_recovery_pending || run_recovery_limit > 170)
-    //         run_recovery_limit = 170;
-    //     run_recovery_pending = 1;
-    //     run_recovery_valid_count = 0;
-    //     run_recovery_frame_sequence = vision->frame_sequence;
-    //     return user_limit;
-    // }
+    if (vision->cross)
+    {
+        if (!run_recovery_pending || run_recovery_limit > 170)
+            run_recovery_limit = 170;
+        run_recovery_pending = 1;
+        run_recovery_valid_count = 0;
+        run_recovery_frame_sequence = vision->frame_sequence;
+        return user_limit;
+    }
     if (run_recovery_pending && vision->frame_sequence != run_recovery_frame_sequence)
     {
         run_recovery_frame_sequence = vision->frame_sequence;
@@ -743,8 +777,8 @@ static int16 run_calc_recovery_speed_limit(const run_vision_struct *vision, int1
         if (run_recovery_valid_count >= 3)
             run_recovery_pending = 0;
     }
-    // if (run_recovery_pending && run_recovery_limit < user_limit)
-    //     return run_recovery_limit;
+    if (run_recovery_pending && run_recovery_limit < user_limit)
+        return run_recovery_limit;
     return user_limit;
 }
 
@@ -859,11 +893,11 @@ static void run_update_speed_ramp(int16 target_speed)
 // 通常连续参与两次方向 PID，但方向控制与执行器输出保持固定 10ms 周期。
 static void run_direction_tick_10ms(void)
 {
-    uint8 keys;
+    run_toggle_enum keys;
     run_vision_struct snapshot;
     uint32 interrupt_state = interrupt_global_disable();
     keys = run_toggle_request;
-    run_toggle_request = 0;
+    run_toggle_request = RUN_TOGGLE_NONE;
     interrupt_global_enable(interrupt_state);
 
     // 视觉超时以 10ms 方向任务计数；只有真正的新帧才清零。
@@ -888,6 +922,16 @@ static void run_direction_tick_10ms(void)
         {
             if (run_start_pending)
                 run_start_pending = 0;
+            else if (RUN_TOGGLE_SPEED_TEST == keys)
+            {
+                // 检测只启动速度环，舵机保持中位，目标为零时保持停车。
+                if (run_speed_test_target > 0)
+                {
+                    run_request_start();
+                    run_speed_test_active = 1;
+                    run_planned_speed = run_speed_test_target;
+                }
+            }
             else
             {
                 run_start_frame_sequence = run_vision.frame_sequence;
@@ -916,6 +960,14 @@ static void run_direction_tick_10ms(void)
         break;
 
     case RUN_STATE_RUNNING:
+        if (run_speed_test_active)
+        {
+            if (keys)
+                run_enter_state(RUN_STATE_IDLE);
+            else
+                run_update_speed_ramp(run_speed_test_target);
+            break;
+        }
         // 独立安全修复：持续丢线停止优先于普通停车，不允许按键清除故障锁。
         if (run_vision.vision_stop)
         {
@@ -990,7 +1042,9 @@ static void run_speed_tick_2ms(void)
     {
         if (run_state_ticks < 65535U)
             run_state_ticks++;
-        if (run_vision.vision_stop)
+        if (run_speed_test_active)
+            run_update_wheel_control(speed, 0, 0);
+        else if (run_vision.vision_stop)
             run_enter_fault(RUN_FAULT_VISION_STOP);
         else
             run_update_wheel_control(speed, (int16)run_get_gap(), run_vision.stop);

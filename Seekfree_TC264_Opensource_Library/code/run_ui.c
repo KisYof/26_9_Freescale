@@ -9,6 +9,7 @@
 #define UI_QUEUE_SIZE 16U
 #define UI_LONG 0x80U
 #define UI_TEXT_MS 200U
+#define UI_SPEED_TEST_STEP (5) // 检测速度调节步长，单位 cm/s
 #define UI_DISPLAY_TYPE (IPS200_TYPE_SPI)
 #define UI_IMAGE_X 8U
 #define UI_IMAGE_Y 48U
@@ -21,6 +22,7 @@
 enum
 {
     UI_CAMERA = 0,           // 上电默认进入摄像头显示页
+    UI_SPEED_TEST,
     UI_RUN,
     UI_LEFT,
     UI_RIGHT,
@@ -35,7 +37,7 @@ static volatile uint8 ui_queue[UI_QUEUE_SIZE];
 static volatile uint8 ui_head;
 static volatile uint8 ui_tail;
 static uint8 ui_long_seen[KEY_NUMBER];
-static uint8 ui_page = UI_CAMERA;
+static volatile uint8 ui_page = UI_CAMERA; // 主循环切页，KEY1 中断按当前页选择启动模式
 static uint8 ui_field;
 static uint8 ui_edit;
 static uint8 ui_step = 1;
@@ -58,7 +60,7 @@ static const char *ui_notice = "RAM only; K2 hold to edit";
 static const uint16 ui_image_period[] = {500U, 200U, 100U};
 static const double ui_gain_step[] = {0.001, 0.01, 0.1, 1.0};
 static const int16 ui_speed_step[] = {1, 5, 10, 50};
-static const char *ui_titles[] = {"CAMERA / CONTROL", "RUN MONITOR", "LEFT WHEEL PID", "RIGHT WHEEL PID",
+static const char *ui_titles[] = {"CAMERA / CONTROL", "SPEED PID TEST", "RUN MONITOR", "LEFT WHEEL PID", "RIGHT WHEEL PID",
     "STEER FUZZY PD BASE",
     "DISPLAY SETTINGS"};
 
@@ -136,7 +138,14 @@ void run_ui_tick_1ms(void)
         if (i == KEY_1)
         {
             // KEY1 直接投递启停请求，不排在菜单、刷屏或通信后面。
-            run_request_toggle();
+            if (ui_page == UI_SPEED_TEST)
+            {
+                run_request_speed_test_toggle();
+            }
+            else
+            {
+                run_request_toggle();
+            }
             continue;
         }
         next = (uint8)((ui_head + 1U) % UI_QUEUE_SIZE);
@@ -215,11 +224,12 @@ static void ui_handle(uint8 event, const run_monitor_t *m)
 {
     uint8 key = event & 0x7fU;
     uint8 long_press = event & UI_LONG;
+    uint8 pause_for_run = ui_auto_pause && m->status.state == RUN_STATE_RUNNING && !m->speed_test_active;
     run_params_t current;
     if (key == 4 && long_press && !ui_edit)
     {
         // 唤醒时同时取消运行自动停刷，保证长按 KEY4 能立即恢复显示。
-        if (ui_auto_pause && m->status.state == RUN_STATE_RUNNING)
+        if (pause_for_run)
         {
             ui_auto_pause = 0;
             ui_screen_on = 1;
@@ -239,7 +249,7 @@ static void ui_handle(uint8 event, const run_monitor_t *m)
         ui_redraw = 1;
         return;
     }
-    if (!ui_screen_on || (ui_auto_pause && m->status.state == RUN_STATE_RUNNING))
+    if (!ui_screen_on || pause_for_run)
     {
         return;
     }
@@ -305,6 +315,17 @@ static void ui_handle(uint8 event, const run_monitor_t *m)
             ui_notice = "Stop car before editing";
         }
     }
+    else if (!long_press && ui_page == UI_SPEED_TEST)
+    {
+        if (key == 3)
+        {
+            run_adjust_speed_test_target(-UI_SPEED_TEST_STEP);
+        }
+        if (key == 4)
+        {
+            run_adjust_speed_test_target(UI_SPEED_TEST_STEP);
+        }
+    }
     else if (!long_press && ui_page == UI_CAMERA)
     {
         if (key == 3)
@@ -348,7 +369,7 @@ static void ui_handle(uint8 event, const run_monitor_t *m)
 static void ui_draw_status(const run_monitor_t *m)
 {
     const char *state = !m->ready ? "INIT" : (m->start_pending ? "WAIT FRAME" :
-        (m->status.state == RUN_STATE_RUNNING ? "RUNNING" :
+        (m->status.state == RUN_STATE_RUNNING ? (m->speed_test_active ? "TESTING" : "RUNNING") :
          (m->status.state == RUN_STATE_FAULT ? "FAULT" : "IDLE")));
     ui_text(0, "%s", ui_titles[ui_page]);
     ui_text(20, "%s  fault:%u", state, (unsigned)m->status.fault);
@@ -361,7 +382,38 @@ static void ui_draw_values(const run_monitor_t *m)
     const char *fault = "NONE";
     run_get_params(&p);
     ui_draw_status(m);
-    if (ui_page == UI_RUN)
+    if (ui_page == UI_SPEED_TEST)
+    {
+        const char *hint = "";
+        ui_text(48, "Test set: %d cm/s", m->speed_test_target);
+        ui_text(72, "Ramp: %d cm/s", m->speed_test_active ? m->ramped_speed : 0);
+        ui_text(96, "     actual(cm/s)    PWM");
+        if (m->speed_test_active)
+        {
+            ui_text(120, "L %11.0f %9.0f", m->pid_values[1], m->pid_values[2]);
+            ui_text(144, "R %11.0f %9.0f", m->pid_values[4], m->pid_values[5]);
+        }
+        else
+        {
+            ui_text(120, "L          --        --");
+            ui_text(144, "R          --        --");
+        }
+        if (m->status.fault)
+        {
+            ui_text(216, "Power cycle to clear fault");
+        }
+        else if (m->status.state != RUN_STATE_IDLE || m->start_pending)
+        {
+            ui_text(216, "K1 stop; adjust when idle");
+        }
+        else
+        {
+            ui_text(216, "K3 -%d / K4 +%d cm/s", UI_SPEED_TEST_STEP, UI_SPEED_TEST_STEP);
+            hint = m->speed_test_target > 0 ? "K1 starts speed test" : "Set speed above 0 to start";
+        }
+        ui_text(240, "%s", hint);
+    }
+    else if (ui_page == UI_RUN)
     {
         ui_text(48, "Speed set: %d cm/s", p.speed);
         ui_text(72, "Plan:%d Ramp:%d", m->planned_speed, m->ramped_speed);
@@ -502,8 +554,15 @@ void run_ui_while(void)
         ui_notice = "Edit cancelled by run state";
         ui_redraw = 1;
     }
-    while (count++ < UI_QUEUE_SIZE && (event = ui_take_event()) != 0)
+    while (count < UI_QUEUE_SIZE && (event = ui_take_event()) != 0)
+    {
         ui_handle(event, &monitor);
+        ++count;
+    }
+    if (count && ui_page == UI_SPEED_TEST)
+    {
+        run_get_monitor(&monitor);
+    }
     if (monitor.status.state != ui_last_state || monitor.status.fault != ui_last_fault
         || monitor.start_pending != ui_last_pending) ui_redraw = 1;
     ui_last_state = monitor.status.state;
@@ -514,7 +573,7 @@ void run_ui_while(void)
     {
         return;
     }
-    if (ui_auto_pause && monitor.status.state == RUN_STATE_RUNNING)
+    if (ui_auto_pause && monitor.status.state == RUN_STATE_RUNNING && !monitor.speed_test_active)
     {
         return;
     }

@@ -125,6 +125,8 @@ typedef struct
     run_status_struct status;
     uint8 ready;             // 摄像头和双核初始化已完成
     uint8 start_pending;     // 正在等待视觉复位和新帧
+    uint8 speed_test_active; // 正在执行双轮速度闭环检测
+    int16 speed_test_target; // 独立检测目标，单位 cm/s
     uint8 mid_valid;
     uint8 line_lost;
     uint32 frame_sequence;
@@ -158,6 +160,8 @@ void run_while(void);    // 双核同步后调用；首次启动调度/通信，
 
 // ------------------ UI/通信使用的控制服务接口 ------------------
 void run_request_toggle(void);       // 只投递启停请求，状态由控制中断改写
+void run_request_speed_test_toggle(void); // 空闲时请求启动检测，运行或等待时仍执行停止
+void run_adjust_speed_test_target(int16 delta); // 仅 IDLE 且无启动请求时调整检测目标
 void run_get_monitor(run_monitor_t *monitor);
 void run_get_imu(run_imu_monitor_t *monitor); // 一致副本；不暴露硬件/设备层内部对象
 void run_get_params(run_params_t *params);
