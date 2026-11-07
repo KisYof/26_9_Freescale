@@ -62,6 +62,8 @@ typedef struct
     uint8 ring_active;     // 0=无环岛，非 0=环岛方向/活动状态
     uint8 ring_stage;
     uint8 ring_size;
+    uint8 offline_row;
+    int ring_exit_y;
 } run_vision_struct;
 
 static run_vision_struct run_vision;
@@ -422,6 +424,8 @@ void run_get_monitor(run_monitor_t *monitor)
     monitor->cross = run_vision.cross;
     monitor->ring_active = run_vision.ring_active;
     monitor->ring_stage = run_vision.ring_stage;
+    monitor->offline_row = run_vision.offline_row;
+    monitor->ring_exit_y = run_vision.ring_exit_y;
     monitor->curve_risk = run_curve_risk;
     monitor->curve_speed_limit = run_curve_speed_limit;
     monitor->pid_values[0] = pid_left.controller.inc.target;
@@ -610,6 +614,8 @@ static uint8 run_read_vision(run_vision_struct *snapshot)
     copy.ring_active = ImageFlag.image_element_rings;
     copy.ring_stage = ImageFlag.image_element_rings_flag;
     copy.ring_size = ImageFlag.ring_big_small;
+    copy.offline_row = ImageStatus.OFFLine;
+    copy.ring_exit_y = Point_Ysite;
     __dsync();
     if (sequence != VisionFrameSequence)
         return 0;

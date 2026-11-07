@@ -12,7 +12,7 @@
 #define RUN_STEER_FUZZY_DEBUG_ENABLE (1)
 #endif
 
-// 1: 弯道调试优先；保留双轮和方向 E/EC/u，9=有符号斜率x1000，12=斜率有效。
+// 1: 弯道调试优先；保留双轮和方向 E/EC/u，9=有符号斜率x1000。
 // 仅切换遥测通道，不改变速度规划、PID 或车辆控制；0 恢复下方原观测模式。
 #ifndef RUN_CURVE_DEBUG_ENABLE
 #define RUN_CURVE_DEBUG_ENABLE (1)
@@ -141,6 +141,8 @@ typedef struct
     uint8 cross;
     uint8 ring_active;
     uint8 ring_stage;
+    uint8 offline_row;
+    int ring_exit_y;
     double pid_values[9];     // 左轮/右轮/方向，每组三项：目标、实际、输出
     double fuzzy_error;
     double fuzzy_delta;
