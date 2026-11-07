@@ -417,9 +417,9 @@ static void wifi_debug_param_while(void)
 
 // WiFi 示波器通道：0~8 = 左轮、右轮、方向环三组 target、actual、output；
 // 9~11 = track slope、planned speed、斜坡后 speed；
-// 12~15 = slope valid、straight_long、赛道元素编码、line lost。
+// 12~15 = slope valid、image_element_rings_flag、赛道元素编码、line lost。
 // 赛道元素编码 = cross + (ring_active << 1)：0=无，1=十字，2=左环岛，4=右环岛，
-// 3/5 表示十字标志与左/右环岛标志同时存在。ring stage 当前不参与速度规划，不占示波器通道。
+// 3/5 表示十字标志与左/右环岛标志同时存在。
 // PID 参数仍通过参数表在线查看/修改，不再占用示波器通道。
 static void wifi_pid_oscilloscope_send(void)
 {
@@ -438,7 +438,7 @@ static void wifi_pid_oscilloscope_send(void)
     wifi_pid_oscilloscope_buffer[10] = (float)debug_monitor.planned_speed;
     wifi_pid_oscilloscope_buffer[11] = (float)debug_monitor.ramped_speed;
     wifi_pid_oscilloscope_buffer[12] = (float)debug_monitor.track_slope_valid;
-    wifi_pid_oscilloscope_buffer[13] = (float)debug_monitor.straight_long;
+    wifi_pid_oscilloscope_buffer[13] = (float)debug_monitor.ring_stage;
     track_element_state = (uint8)(debug_monitor.cross
                         + (uint8)(debug_monitor.ring_active << 1));
     wifi_pid_oscilloscope_buffer[14] = (float)track_element_state;
@@ -450,23 +450,17 @@ static void wifi_pid_oscilloscope_send(void)
     wifi_pid_oscilloscope_buffer[6] = (float)debug_monitor.fuzzy_error;
     wifi_pid_oscilloscope_buffer[7] = (float)debug_monitor.fuzzy_delta;
     wifi_pid_oscilloscope_buffer[8] = (float)debug_monitor.fuzzy_output;
-    wifi_pid_oscilloscope_buffer[13] = (float)debug_monitor.curve_speed_limit;
 #elif RUN_SPEED_PLANNER_DEBUG_ENABLE
-    // V2 仍为 16 通道：保留双轮 target/actual/PWM、gap、原始 slope、计划和斜坡速度。
-    // 编译期切换后须在会话元数据标明：6=risk, 7=curve limit, 13=straight confirmed。
+    // 速度规划观测模式：6=risk, 7=curve limit。
     wifi_pid_oscilloscope_buffer[6] = (float)debug_monitor.curve_risk;
     wifi_pid_oscilloscope_buffer[7] = (float)debug_monitor.curve_speed_limit;
-    wifi_pid_oscilloscope_buffer[13] = (float)debug_monitor.straight_confirmed;
 #elif RUN_STEER_FUZZY_DEBUG_ENABLE
-    // 可选观测模式：6=E, 7=受限 EC, 8=u, 9=Kp_eff, 12=Kd_eff, 13=饱和。
-    // 0~5 双轮、10~11 速度、14~15 元素/丢线保持原顺序；默认模式完全兼容。
+    // 模糊 PD 观测模式：6=E, 7=受限 EC, 8=u, 9=Kp_eff, 12=Kd_eff。
     wifi_pid_oscilloscope_buffer[6] = (float)debug_monitor.fuzzy_error;
     wifi_pid_oscilloscope_buffer[7] = (float)debug_monitor.fuzzy_delta;
     wifi_pid_oscilloscope_buffer[8] = (float)debug_monitor.fuzzy_output;
     wifi_pid_oscilloscope_buffer[9] = (float)debug_monitor.fuzzy_kp;
     wifi_pid_oscilloscope_buffer[12] = (float)debug_monitor.fuzzy_kd;
-    wifi_pid_oscilloscope_buffer[13] =
-        (float)debug_monitor.fuzzy_saturated;
 #endif
 
     seekfree_assistant_oscilloscope_send(&wifi_pid_oscilloscope);

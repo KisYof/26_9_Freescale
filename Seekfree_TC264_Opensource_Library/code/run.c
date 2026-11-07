@@ -421,6 +421,7 @@ void run_get_monitor(run_monitor_t *monitor)
     monitor->straight_confirmed = run_straight_confirmed;
     monitor->cross = run_vision.cross;
     monitor->ring_active = run_vision.ring_active;
+    monitor->ring_stage = run_vision.ring_stage;
     monitor->curve_risk = run_curve_risk;
     monitor->curve_speed_limit = run_curve_speed_limit;
     monitor->pid_values[0] = pid_left.controller.inc.target;

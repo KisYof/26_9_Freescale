@@ -7,19 +7,19 @@
 // 1ms 基础调度、2ms 双轮速度 PID、10ms 方向 PID、堵转和视觉超时保护。
 // 运行期间的状态只由控制中断改写，UI/通信通过快照和参数接口访问。
 
-// 0: 原 16 通道；1: 将方向组及部分规划通道切换为模糊 PD 观测量。
+// 0: 基础示波器通道；1: 将方向组及部分规划通道切换为模糊 PD 观测量。
 #ifndef RUN_STEER_FUZZY_DEBUG_ENABLE
 #define RUN_STEER_FUZZY_DEBUG_ENABLE (1)
 #endif
 
-// 1: 弯道调试优先；保留双轮和方向 E/EC/u，9=有符号斜率x1000，12=斜率有效，13=弯道限速。
+// 1: 弯道调试优先；保留双轮和方向 E/EC/u，9=有符号斜率x1000，12=斜率有效。
 // 仅切换遥测通道，不改变速度规划、PID 或车辆控制；0 恢复下方原观测模式。
 #ifndef RUN_CURVE_DEBUG_ENABLE
 #define RUN_CURVE_DEBUG_ENABLE (1)
 #endif
 
 // 0: 保留原示波器通道；1: 速度规划观测，优先于模糊 PD 调试模式。
-// 模式 1: 6=risk, 7=curve limit, 13=straight confirmed，其余通道不变。
+// 模式 1: 6=risk, 7=curve limit，其余通道沿用基础配置。
 #ifndef RUN_SPEED_PLANNER_DEBUG_ENABLE
 #define RUN_SPEED_PLANNER_DEBUG_ENABLE (0)
 #endif
@@ -35,7 +35,7 @@
 #define RUN_UART_PID_DEBUG_ENABLE (0)   // 串口 PID 文本调参与数据输出
 #endif
 #ifndef CHEN
-#define CHEN (0)
+#define CHEN (1)
 #endif
 
 // IMU 只作原始数据观测；采样在主循环完成，不进入当前方向/速度闭环。
@@ -140,6 +140,7 @@ typedef struct
     uint8 straight_confirmed;
     uint8 cross;
     uint8 ring_active;
+    uint8 ring_stage;
     double pid_values[9];     // 左轮/右轮/方向，每组三项：目标、实际、输出
     double fuzzy_error;
     double fuzzy_delta;
