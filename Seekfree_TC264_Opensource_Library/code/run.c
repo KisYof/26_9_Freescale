@@ -26,8 +26,8 @@
 // Track_Slope_x1000 是弯道趋势而非严格几何曲率，速度标定表见 run_calc_curve_speed_limit。
 #define RUN_STRAIGHT_SLOPE_THRESHOLD (350) // 低风险直道许可阈值
 #define RUN_SPEED_UNKNOWN_LIMIT (250)      // slope 无效时的保守速度上限
-#define RUN_SPEED_CROSS_LIMIT (340)        // 十字速度上限
-#define RUN_SPEED_RING_LIMIT (240)         // 环岛速度上限
+#define RUN_SPEED_CROSS_LIMIT (230)        // 十字速度上限
+#define RUN_SPEED_RING_LIMIT (220)         // 环岛速度上限
 #define RUN_SPEED_LINE_LOST_LIMIT (210)    // 丢线时的安全速度上限
 
 #define RUN_STRAIGHT_CONFIRM_FRAMES (8U)   // 至少八个有效新帧，不按调度次数累计
