@@ -18,15 +18,21 @@
 #define RUN_STALL_CONFIRM_TICKS (150U) // 速度任务计数：堵转条件连续成立 300ms 才确认
 #define RUN_STALL_TARGET_MIN (20)      // 目标速度大于 20cm/s 才谈堵转
 #define RUN_STALL_SPEED_MAX (5)        // 实际速度绝对值小于 5cm/s 视为停转
+#define RUN_STOP_SPEED_MAX (5)         // 双轮原始/滤波速度均在 ±5cm/s 内才计为接近静止
+#define RUN_STOP_CONFIRM_TICKS (50U)  // 2ms 速度任务：连续接近静止 100ms 后回空闲
 #define RUN_SPEED_ACCEL_STEP (10)       // 10ms 加速步长，保守初值，需实车标定
 #define RUN_SPEED_DECEL_STEP (30)       // 10ms 减速步长，必须大于加速步长，需实车标定
+#define RUN_RING_RELEASE_STEP (10) // 每个稳定新图像帧允许恢复的速度上限
+#define RUN_RING_RELEASE_MID (20)
+#define RUN_RING_RELEASE_DELTA (5)
+#define RUN_RING_RELEASE_RISK (400)
 #define SPEED_MID (350)                // 调试层默认目标速度
-#define STEER_OUTPUT_MAP_SCALE (0.39)  // 转向输出换算成舵机角的缩放系数
+#define STEER_OUTPUT_MAP_SCALE (0.42)  // 转向输出换算成舵机角的缩放系数
 
 // Track_Slope_x1000 是弯道趋势而非严格几何曲率，速度标定表见 run_calc_curve_speed_limit。
 #define RUN_STRAIGHT_SLOPE_THRESHOLD (350) // 低风险直道许可阈值
 #define RUN_SPEED_UNKNOWN_LIMIT (250)      // slope 无效时的保守速度上限
-#define RUN_SPEED_CROSS_LIMIT (340)        // 十字速度上限
+#define RUN_SPEED_CROSS_LIMIT (260)        // 十字速度上限
 #define RUN_SPEED_RING_LIMIT (240)         // 环岛速度上限
 #define RUN_SPEED_LINE_LOST_LIMIT (210)    // 丢线时的安全速度上限
 
@@ -71,6 +77,8 @@ static uint16 run_state_ticks = 0;       // 进入当前状态后的 2ms 速度�
 static uint16 run_vision_ticks = 0;      // 距上一帧新视觉数据的 10ms 方向任务计数
 static uint16 run_left_stall_ticks = 0;  // 左轮堵转条件连续成立的 2ms 计数
 static uint16 run_right_stall_ticks = 0; // 右轮堵转条件连续成立的 2ms 计数
+static uint8 run_zebra_stopping = 0;    // 斑马线停车请求锁存，闭环停稳前保持 RUNNING
+static uint16 run_stop_confirm_ticks = 0; // 双轮连续接近静止的 2ms 计数
 static uint8 run_speed_tick_count = 0;   // 1ms 基础节拍到 2ms 速度任务的分频计数
 static uint8 run_direction_tick_count = 0; // 1ms 基础节拍到 10ms 方向任务的分频计数
 static int32 run_held_mid_error = 0;     // 丢线时保持最后一次有效方向误差
@@ -90,6 +98,12 @@ static uint8 run_recovery_pending = 0;
 static uint8 run_recovery_valid_count = 0;
 static int16 run_recovery_limit = 170;
 static int32 run_recovery_mid_error = 0;
+static uint8 run_ring_release_armed = 0;
+static uint8 run_ring_release_active = 0;
+static uint8 run_ring_release_have_error = 0;
+static uint32 run_ring_release_frame = 0;
+static int32 run_ring_release_error = 0;
+static int16 run_ring_release_limit = RUN_SPEED_RING_LIMIT;
 static run_imu_monitor_t run_imu_monitor;
 static volatile uint16 run_imu_age_ms = 65535U;
 #if RUN_IMU_ENABLE
@@ -271,8 +285,8 @@ void run_init(void)
     hardware_init();
     memset(&run_imu_monitor, 0, sizeof(run_imu_monitor));
     run_imu_age_ms = 65535U;
-    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 40.3, 0.085, 0.0, 4500, -4500, 0, 0);
-    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 40.3, 0.085, 0.0, 4500, -4500, 0, 0);
+    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 45.3, 0.093, 0.0, 6000, -1000, 0, 0);
+    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 45.3, 0.093, 0.0, 6000, -1000, 0, 0);
     steer_base_gains.kp = 0.82;
     steer_base_gains.ki = 0.0;
     steer_base_gains.kd = 0.28;
@@ -490,6 +504,8 @@ static void run_enter_state(run_state_enum state)
     run_state_ticks = 0;
     run_left_stall_ticks = 0;
     run_right_stall_ticks = 0;
+    run_zebra_stopping = 0;
+    run_stop_confirm_ticks = 0;
     speed = 0;
     hardware_stop();
     PID_Controller_Reset(&pid_left);
@@ -512,6 +528,12 @@ static void run_enter_state(run_state_enum state)
     run_recovery_valid_count = 0;
     run_recovery_limit = 170;
     run_recovery_mid_error = 0;
+    run_ring_release_armed = 0;
+    run_ring_release_active = 0;
+    run_ring_release_have_error = 0;
+    run_ring_release_frame = 0;
+    run_ring_release_error = 0;
+    run_ring_release_limit = RUN_SPEED_RING_LIMIT;
     if (RUN_STATE_FAULT == state)
         run_toggle_request = RUN_TOGGLE_NONE;
 }
@@ -584,9 +606,23 @@ static uint8 run_stall_check(int16 target, int16 actual, int16 pwm, uint16 *tick
     return (*ticks >= RUN_STALL_CONFIRM_TICKS);
 }
 
-// 一个控制周期的执行链：目标速度 ± 差速 -> 双轮 PID -> 堵转检查 -> 视觉停车 -> 输出 PWM。
-// 状态不是 RUNNING 时直接停输出返回；一旦判故障或收到停车标志就不再下发 PWM。
-static void run_update_wheel_control(int16 target_speed, int16 gap, uint8 stop_requested)
+// 斑马线停车先锁存请求并给双轮零速目标，保留原 PID 状态产生制动力。
+// 停车期间不再叠加转向差速；只有速度任务确认停稳后才切回空闲。
+static void run_begin_zebra_stop(void)
+{
+    if (run_zebra_stopping)
+        return;
+    run_zebra_stopping = 1;
+    run_stop_confirm_ticks = 0;
+    run_planned_speed = 0;
+    speed = 0;
+    run_direction_gap = 0;
+    hardware_set_servo(0);
+}
+
+// 一个控制周期的执行链：目标速度 ± 差速 -> 双轮 PID -> 堵转检查 -> 输出 PWM。
+// 状态不是 RUNNING 时直接停输出返回；故障保护仍立即停输出。
+static void run_update_wheel_control(int16 target_speed, int16 gap)
 {
     int16 left_target = target_speed + gap;
     int16 right_target = target_speed - gap;
@@ -615,13 +651,31 @@ static void run_update_wheel_control(int16 target_speed, int16 gap, uint8 stop_r
         run_enter_fault(fault);
         return;
     }
-    if (stop_requested)
-    {
-        // 第二次斑马线处理完成：回空闲态，run_enter_state 里已停输出
-        run_enter_state(RUN_STATE_IDLE);
-        return;
-    }
     hardware_set_motors(left_pwm, right_pwm);
+}
+
+// 每 2ms 保持双轮零速闭环；原始速度防止滤波滞后，连续确认避免单次零脉冲误判。
+static void run_update_zebra_stop(void)
+{
+    run_begin_zebra_stop();
+    run_update_wheel_control(0, 0);
+    if (RUN_STATE_RUNNING != run_status.state)
+        return;
+
+    if (raw_left >= -RUN_STOP_SPEED_MAX && raw_left <= RUN_STOP_SPEED_MAX
+        && raw_right >= -RUN_STOP_SPEED_MAX && raw_right <= RUN_STOP_SPEED_MAX
+        && encoder_left >= -RUN_STOP_SPEED_MAX && encoder_left <= RUN_STOP_SPEED_MAX
+        && encoder_right >= -RUN_STOP_SPEED_MAX && encoder_right <= RUN_STOP_SPEED_MAX)
+    {
+        if (run_stop_confirm_ticks < RUN_STOP_CONFIRM_TICKS)
+            run_stop_confirm_ticks++;
+    }
+    else
+    {
+        run_stop_confirm_ticks = 0;
+    }
+    if (run_stop_confirm_ticks >= RUN_STOP_CONFIRM_TICKS)
+        run_enter_state(RUN_STATE_IDLE);
 }
 
 // 成对读取视觉变量：序号为 0 或奇数（视觉层正在写）直接失败；
@@ -676,7 +730,7 @@ static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 u
     // 普通赛道的斜率与速度标定表。
     // 风险上升立即响应，下降沿用新帧缓释；不是额外的远端曲率预测。
     static const int16 slope_points[] = {0, 120, 300, 400, 500, 800, 1100};
-    static const int16 speed_points[] = {340, 330, 305, 275, 235, 220, 210};
+    static const int16 speed_points[] = {340, 330, 310, 285, 235, 220, 210};
     int16 limit = speed_points[sizeof(speed_points) / sizeof(speed_points[0]) - 1U];
     int16 slope = run_curve_risk;
     uint8 point;
@@ -690,8 +744,9 @@ static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 u
         return (user_limit < limit) ? user_limit : limit;
     }
     // 有效特殊元素不套用普通中线斜率；由独立元素限速约束，不能申请高速。
-    // if (vision->cross || vision->ring_active || vision->zebra)
-    //     return (user_limit < 270) ? user_limit : 270; // 缓弯提速不带动元素上限。
+    // 只对有效圆环/十字解除旧风险约束；斑马线维持原有策略。
+    if (vision->cross || vision->ring_active)
+        return user_limit; // 元素、恢复与安全上限在 planner 中继续取最小值。
 
     for (point = 1; point < (uint8)(sizeof(slope_points) / sizeof(slope_points[0])); point++)
     {
@@ -748,23 +803,23 @@ static int16 run_calc_recovery_speed_limit(const run_vision_struct *vision, int1
         limit = vision->line_lost ? RUN_SPEED_LINE_LOST_LIMIT : RUN_SPEED_UNKNOWN_LIMIT;
         if (run_planned_speed > 0 && run_planned_speed < limit)
             limit = run_planned_speed;
-        // if (run_recovery_pending && run_recovery_limit < limit)
-        //     limit = run_recovery_limit;
+        if (run_recovery_pending && run_recovery_limit < limit)
+            limit = run_recovery_limit;
         run_recovery_limit = limit;
         run_recovery_pending = 1;
         run_recovery_valid_count = 0;
         run_recovery_frame_sequence = vision->frame_sequence;
         return user_limit < limit ? user_limit : limit;
     }
-    // if (vision->cross)
-    // {
-    //     if (!run_recovery_pending || run_recovery_limit > 170)
-    //         run_recovery_limit = 170;
-    //     run_recovery_pending = 1;
-    //     run_recovery_valid_count = 0;
-    //     run_recovery_frame_sequence = vision->frame_sequence;
-    //     return user_limit;
-    // }
+    if (vision->cross)
+    {
+        if (!run_recovery_pending || run_recovery_limit > 170)
+            run_recovery_limit = 170;
+        run_recovery_pending = 1;
+        run_recovery_valid_count = 0;
+        run_recovery_frame_sequence = vision->frame_sequence;
+        return user_limit;
+    }
     if (run_recovery_pending && vision->frame_sequence != run_recovery_frame_sequence)
     {
         run_recovery_frame_sequence = vision->frame_sequence;
@@ -777,15 +832,72 @@ static int16 run_calc_recovery_speed_limit(const run_vision_struct *vision, int1
         if (run_recovery_valid_count >= 3)
             run_recovery_pending = 0;
     }
-    // if (run_recovery_pending && run_recovery_limit < user_limit)
-    //     return run_recovery_limit;
+    if (run_recovery_pending && run_recovery_limit < user_limit)
+        return run_recovery_limit;
     return user_limit;
+}
+
+// 出环后只恢复速度上限，不使用旧中线，也不改动方向环。
+static int16 run_calc_ring_release_limit(const run_vision_struct *vision, int16 user_limit)
+{
+    int32 difference;
+    if (vision->ring_active)
+    {
+        run_ring_release_armed = 1;
+        run_ring_release_active = 0;
+        run_ring_release_have_error = 0;
+        run_ring_release_frame = vision->frame_sequence;
+        return user_limit;
+    }
+    if (run_ring_release_armed)
+    {
+        run_ring_release_armed = 0;
+        run_ring_release_active = 1;
+        run_ring_release_limit = RUN_SPEED_RING_LIMIT;
+        if (run_planned_speed > 0 && run_planned_speed < run_ring_release_limit)
+            run_ring_release_limit = run_planned_speed;
+    }
+    if (!run_ring_release_active)
+        return user_limit;
+    if (!vision->mid_valid || !vision->track_slope_valid || vision->line_lost
+        || vision->cross || vision->zebra || vision->stop || vision->vision_stop
+        || run_status.fault || run_status.state != RUN_STATE_RUNNING
+        || run_vision_ticks >= RUN_VISION_TIMEOUT_TICKS)
+    {
+        run_ring_release_have_error = 0;
+        run_ring_release_frame = vision->frame_sequence;
+    }
+    else if (vision->frame_sequence != run_ring_release_frame)
+    {
+        run_ring_release_frame = vision->frame_sequence;
+        if (vision->mid_error < -RUN_RING_RELEASE_MID || vision->mid_error > RUN_RING_RELEASE_MID
+            || run_curve_risk > RUN_RING_RELEASE_RISK)
+            run_ring_release_have_error = 0;
+        else
+        {
+            difference = run_ring_release_have_error ? vision->mid_error - run_ring_release_error : 0;
+            if (run_ring_release_have_error && difference >= -RUN_RING_RELEASE_DELTA
+                && difference <= RUN_RING_RELEASE_DELTA)
+            {
+                run_ring_release_limit += RUN_RING_RELEASE_STEP;
+                // 完成逐帧恢复后才撤销限制；用户临时调低速度不提前撤销保护。
+                if (run_ring_release_limit >= RUN_PARAM_SPEED_MAX)
+                    run_ring_release_limit = RUN_PARAM_SPEED_MAX;
+                if (run_ring_release_limit >= user_limit && user_limit >= SPEED_MID)
+                    run_ring_release_active = 0;
+            }
+            run_ring_release_error = vision->mid_error;
+            run_ring_release_have_error = 1;
+        }
+    }
+    return run_ring_release_limit < user_limit ? run_ring_release_limit : user_limit;
 }
 
 static int16 run_speed_planner(const run_vision_struct *vision)
 {
     int16 planned = speed_setting;
     int16 recovery_limit;
+    int16 ring_release_limit;
     int32 slope = vision->track_slope;
 
     if (planned > RUN_PARAM_SPEED_MAX)
@@ -796,6 +908,12 @@ static int16 run_speed_planner(const run_vision_struct *vision)
     // 反向/停车命令保留原语义；当前前向赛道规划仅处理正速度。
     if (planned <= 0)
     {
+        run_ring_release_armed = 0;
+        run_ring_release_active = 0;
+        run_ring_release_have_error = 0;
+        run_ring_release_frame = 0;
+        run_ring_release_error = 0;
+        run_ring_release_limit = RUN_SPEED_RING_LIMIT;
         run_recovery_pending = 0;
         run_recovery_valid_count = 0;
         run_recovery_frame_sequence = vision->frame_sequence;
@@ -856,10 +974,13 @@ static int16 run_speed_planner(const run_vision_struct *vision)
         // 失效/元素期间不把 risk 清零，不用该帧的低 slope 提前恢复高速。
     }
 
+    ring_release_limit = run_calc_ring_release_limit(vision, planned);
     recovery_limit = run_calc_recovery_speed_limit(vision, planned);
     run_curve_speed_limit = run_calc_curve_speed_limit(vision, planned);
     if (recovery_limit < run_curve_speed_limit)
         run_curve_speed_limit = recovery_limit;
+    if (ring_release_limit < run_curve_speed_limit)
+        run_curve_speed_limit = ring_release_limit;
     run_element_speed_limit = run_calc_element_speed_limit(vision);
     run_safety_speed_limit = run_calc_safety_speed_limit(vision);
 
@@ -983,10 +1104,10 @@ static void run_direction_tick_10ms(void)
             run_enter_fault(RUN_FAULT_VISION_TIMEOUT);
             break;
         }
-        // 视觉停车标志在方向任务中立即生效，不等待下一次 2ms 速度任务。
-        if (run_vision.stop)
+        // 斑马线停车锁存后保持零速闭环，不因后续视觉标志变化恢复行驶。
+        if (run_vision.stop || run_zebra_stopping)
         {
-            run_enter_state(RUN_STATE_IDLE);
+            run_begin_zebra_stop();
             break;
         }
         // 同一视觉快照同时供速度规划与方向控制使用；规划只改变基础目标速度。
@@ -1040,11 +1161,13 @@ static void run_speed_tick_2ms(void)
         if (run_state_ticks < 65535U)
             run_state_ticks++;
         if (run_speed_test_active)
-            run_update_wheel_control(speed, 0, 0);
+            run_update_wheel_control(speed, 0);
         else if (run_vision.vision_stop)
             run_enter_fault(RUN_FAULT_VISION_STOP);
+        else if (run_vision.stop || run_zebra_stopping)
+            run_update_zebra_stop();
         else
-            run_update_wheel_control(speed, (int16)run_get_gap(), run_vision.stop);
+            run_update_wheel_control(speed, (int16)run_get_gap());
     }
     else
     {
