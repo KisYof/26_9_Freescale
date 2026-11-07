@@ -685,6 +685,8 @@ void Get_AllLine(void)
   ExterMid_num=0;                                                        //记录midblack判断次数
   ExtenRFlag = 0;                                                        //标志位清0
   ExtenLFlag = 0;                                                        //标志位清0
+  Cross_Corner_L = 0;                                                   //下拐点只使用本帧找到的位置
+  Cross_Corner_R = 0;
   Midblack_aim_point=0;                                                  //通过ExterMid_Det计算出来的在ExterMid_Row的标准点
   ImageStatus.OFFLine=3;                                                 //这个结构体成员我之所以在这里赋值，是因为我ImageStatus结构体里面的成员太多了，但是暂时又只用到了OFFLine，所以我在哪用到它就在哪赋值。
   ImageStatus.Miss_Right_lines = 0;
@@ -1640,140 +1642,185 @@ void Search_Border_OTSU(uint8 imageInput[LCDH][LCDW], uint8 Row, uint8 Col, uint
 //  @Author
 //  Sample usage:   Get_ExtensionLine();
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
-// void Get_ExtensionLine(void)
-// {
-//     //ImageStatus.OFFLine=5;                                                  //这个结构体成员我之所以在这里赋值，是因为我ImageStatus结构体里面的成员太多了，但是暂时又只用到了OFFLine，所以我在哪用到它就在哪赋值。
-//     /************************************左边线的补线处理*************************************************/
-// //    if (ImageStatus.WhiteLine >= 8)   //可给严苛一点                            //如果丢边行的数量大于8
-//     TFSite = LCDH-5;                                                          //那就给TFSite赋值为55，这个变量是待会算补线斜率的一个变量。
-//     left_FTSite=0;
-//     right_FTSite=0;
-// //    ImageFlag.Cross_Flag=0;
-// 
-//     if (ExtenLFlag != 'F')
-//         for (Ysite = LCDH-10; Ysite >= (ImageStatus.OFFLine + 4);Ysite--)       //从第54开始往上扫，一直扫到顶边下面几行。
-//         {
-//             PicTemp = Pixle[Ysite];
-//             if (ImageDeal[Ysite].IsLeftFind =='W'&&Ysite<60)                             //如果本行的左边线类型是W类型，也就是无边行类型。
-//             {
-//                 if (ImageDeal[Ysite + 1].LeftBorder >= LCDW-10)                //如果左边界到了第70列右边去了，那大概率就是极端情况，说明已经快寄了。
-//                 {
-//                   ImageStatus.OFFLine = Ysite + 1;                             //这种情况最好的处理方法就是不处理，直接跳出循环。,记录offline
-//                   break;
-//                 }
-//                 while (Ysite >= (ImageStatus.OFFLine + 4))                     //如果左边界正常，那就进入while循环卡着，直到满足循环结束条件。
-//                 {
-//                     Ysite--;                                                   //行数减减
-//                     if (ImageDeal[Ysite].IsLeftFind == 'T'
-//                             &&ImageDeal[Ysite - 1].IsLeftFind == 'T'
-//                          &&ImageDeal[Ysite - 2].IsLeftFind == 'T'
-// 
-//                       /*&&ImageDeal[Ysite - 2].LeftBorder > 0
-//                       &&ImageDeal[Ysite - 2].LeftBorder <LCDW-10*/
-//                       )                                                        //如果扫到的无边行的上面连续三行都是正常边线
-//                     {
-//                       left_FTSite = Ysite - 5; //3给大点会增加对锯齿拐角的抵抗力         //那就把扫到的这一行的上面两行存入FTsite变量
-// //                      if(Buxian_Flag_L)
-// //                      {
-// //                          left_FTSite=Ysite;//找十字左上拐点
-// //                      }
-//                       break;                                                   //跳出while循环
-//                     }
-//                 }
-//                 if(ImageDeal[Cross_Corner_L].LeftBorder<0)
-//                     ImageDeal[Cross_Corner_L].LeftBorder=0;
-//                DetL =((float)(ImageDeal[left_FTSite].LeftBorder -ImageDeal[Cross_Corner_L].LeftBorder)) /((float)(left_FTSite - Cross_Corner_L));  //计算左边线的补线斜率
-//                if (left_FTSite > ImageStatus.OFFLine+5)                        //如果FTSite存储的那一行在图像顶边OFFline的下面
-//                {
-//                    for (ytemp = Cross_Corner_L; ytemp >= left_FTSite; ytemp--)//那么我就从第一次扫到的左边界的下面第二行的位置开始往上一直补线，补到FTSite行。
-//                    {
-//                    ImageDeal[ytemp].LeftBorder =(int)(DetL * ((float)(ytemp - Cross_Corner_L))) +ImageDeal[Cross_Corner_L].LeftBorder;//这里就是具体的补线操作了
-//                    }
-//                        Ysite=(ImageStatus.OFFLine + 4)-1;                        //减一停止外层的循环，因为有可能遇到双十字，以底部十字补线一次即可
-//                }
-//             }                                         //这里为什么要Ysite+2，我没法在注释里面讲清楚，自己领会吧。//应该就是在找到无边行的下两行来计算斜率
-//         }
-//     /************************************左边线的补线处理*************************************************/
-// //    wireless_uart_send_byte(0x00);
-// 
-//     /************************************右边线的补线处理（跟左边线处理思路一模一样）注释略*************************************************/
-//     if (ExtenRFlag != 'F')
-//         for (Ysite = LCDH-10; Ysite >= (ImageStatus.OFFLine + 4);Ysite--)
-//         {
-//           PicTemp = Pixle[Ysite];//存当前行
-//           if (ImageDeal[Ysite].IsRightFind =='W'&&Ysite<60)
-//           {
-//             if (ImageDeal[Ysite + 1].RightBorder <= 10)
-//             {
-//               ImageStatus.OFFLine =Ysite + 1;
-//               break;
-//             }
-//             while (Ysite >= (ImageStatus.OFFLine + 4))
-//             {
-//               Ysite--;
-//               if (ImageDeal[Ysite].IsRightFind == 'T'
-//                   &&ImageDeal[Ysite - 1].IsRightFind == 'T'
-//                   &&ImageDeal[Ysite - 2].IsRightFind == 'T'
-//                   /*&&ImageDeal[Ysite - 2].RightBorder < LCDW-1
-//                   &&ImageDeal[Ysite - 2].RightBorder > 10*/
-//                   )
-//               {
-//                   right_FTSite = Ysite - 5;
-// //                  if(Buxian_Flag_R==1)
-// //                  {
-// //                      right_FTSite=Ysite;
-// //                  }
-//                 break;
-//               }
-//             }
-//             if(ImageDeal[Cross_Corner_R].RightBorder>LCDW-1)
-//                 ImageDeal[Cross_Corner_R].RightBorder=LCDW-1;
-//            DetR =((float)(ImageDeal[right_FTSite].RightBorder -ImageDeal[Cross_Corner_R].RightBorder)) /((float)(right_FTSite - Cross_Corner_R));
-//            if (right_FTSite > ImageStatus.OFFLine+5)
-//            {
-//                  for (ytemp = Cross_Corner_R; ytemp >= right_FTSite;ytemp--)
+/* 十字补线方式：1使用原来的上下端点补线，0使用上方拟合延长。 */
+#ifndef CROSS_USE_LEGACY_EXTENSION
+#define CROSS_USE_LEGACY_EXTENSION 0
+#endif
+
+#if CROSS_USE_LEGACY_EXTENSION
+void Get_ExtensionLine(void)
+{
+    int Left_Corner = Cross_Corner_L;
+    int Right_Corner = Cross_Corner_R;
+
+    if (ImageFlag.Cross_Flag != 1 || ImageFlag.image_element_rings != 0 ||
+        ImageFlag.Zebra_Flag != 0)
+    {
+        return;
+    }
+
+    /* 首个丢边行可能沿用了下一行的坐标，补线用下一行的实测点。 */
+    if (Left_Corner > ImageStatus.OFFLine && Left_Corner < LCDH-1 &&
+        ImageDeal[Left_Corner].IsLeftFind == 'W' &&
+        ImageDeal[Left_Corner + 1].IsLeftFind == 'T' &&
+        ImageDeal[Left_Corner].LeftBorder == ImageDeal[Left_Corner + 1].LeftBorder)
+    {
+        Left_Corner++;
+    }
+    if (Right_Corner > ImageStatus.OFFLine && Right_Corner < LCDH-1 &&
+        ImageDeal[Right_Corner].IsRightFind == 'W' &&
+        ImageDeal[Right_Corner + 1].IsRightFind == 'T' &&
+        ImageDeal[Right_Corner].RightBorder == ImageDeal[Right_Corner + 1].RightBorder)
+    {
+        Right_Corner++;
+    }
+
+    //ImageStatus.OFFLine=5;                                                  //这个结构体成员我之所以在这里赋值，是因为我ImageStatus结构体里面的成员太多了，但是暂时又只用到了OFFLine，所以我在哪用到它就在哪赋值。
+    /************************************左边线的补线处理*************************************************/
+//    if (ImageStatus.WhiteLine >= 8)   //可给严苛一点                            //如果丢边行的数量大于8
+    TFSite = LCDH-5;                                                          //那就给TFSite赋值为55，这个变量是待会算补线斜率的一个变量。
+    left_FTSite=0;
+    right_FTSite=0;
+//    ImageFlag.Cross_Flag=0;
+
+    if (ExtenLFlag != 'F' && Left_Corner > ImageStatus.OFFLine &&
+        Left_Corner < LCDH && ImageDeal[Left_Corner].IsLeftFind == 'T' &&
+        ImageDeal[Left_Corner].LeftBorder > 1 &&
+        ImageDeal[Left_Corner].LeftBorder < LCDW-2)
+        for (Ysite = LCDH-10; Ysite >= (ImageStatus.OFFLine + 4);Ysite--)       //从第54开始往上扫，一直扫到顶边下面几行。
+        {
+            PicTemp = Pixle[Ysite];
+            if (ImageDeal[Ysite].IsLeftFind =='W'&&Ysite<60)                             //如果本行的左边线类型是W类型，也就是无边行类型。
+            {
+                if (ImageDeal[Ysite + 1].LeftBorder >= LCDW-10)                //如果左边界到了第70列右边去了，那大概率就是极端情况，说明已经快寄了。
+                {
+                  ImageStatus.OFFLine = Ysite + 1;                             //这种情况最好的处理方法就是不处理，直接跳出循环。,记录offline
+                  break;
+                }
+                while (Ysite >= (ImageStatus.OFFLine + 4))                     //如果左边界正常，那就进入while循环卡着，直到满足循环结束条件。
+                {
+                    Ysite--;                                                   //行数减减
+                    if (ImageDeal[Ysite].IsLeftFind == 'T'
+                            &&ImageDeal[Ysite - 1].IsLeftFind == 'T'
+                         &&ImageDeal[Ysite - 2].IsLeftFind == 'T'
+                          && Ysite - 5 > ImageStatus.OFFLine + 5    //先检查实际使用的上端点行号
+                          && Ysite - 5 < Left_Corner
+                          && ImageDeal[Ysite - 5].IsLeftFind == 'T'
+                          && ImageDeal[Ysite - 5].LeftBorder > 1
+                          && ImageDeal[Ysite - 5].LeftBorder < LCDW-2
+
+                      /*&&ImageDeal[Ysite - 2].LeftBorder > 0
+                      &&ImageDeal[Ysite - 2].LeftBorder <LCDW-10*/
+                      )                                                        //如果扫到的无边行的上面连续三行都是正常边线
+                    {
+                      left_FTSite = Ysite - 5; //3给大点会增加对锯齿拐角的抵抗力         //那就把扫到的这一行的上面两行存入FTsite变量
+//                      if(Buxian_Flag_L)
+//                      {
+//                          left_FTSite=Ysite;//找十字左上拐点
+//                      }
+                      break;                                                   //跳出while循环
+                    }
+                }
+               if (left_FTSite > ImageStatus.OFFLine+5)                        //如果FTSite存储的那一行在图像顶边OFFline的下面
+               {
+                    DetL =((float)(ImageDeal[left_FTSite].LeftBorder -ImageDeal[Left_Corner].LeftBorder)) /((float)(left_FTSite - Left_Corner));  //计算左边线的补线斜率
+                   for (ytemp = Left_Corner; ytemp >= left_FTSite; ytemp--)//那么我就从第一次扫到的左边界的下面第二行的位置开始往上一直补线，补到FTSite行。
+                   {
+                   ImageDeal[ytemp].LeftBorder =(int)(DetL * ((float)(ytemp - Left_Corner))) +ImageDeal[Left_Corner].LeftBorder;//这里就是具体的补线操作了
+                   }
+                       Ysite=(ImageStatus.OFFLine + 4)-1;                        //减一停止外层的循环，因为有可能遇到双十字，以底部十字补线一次即可
+               }
+            }                                         //这里为什么要Ysite+2，我没法在注释里面讲清楚，自己领会吧。//应该就是在找到无边行的下两行来计算斜率
+        }
+    /************************************左边线的补线处理*************************************************/
+//    wireless_uart_send_byte(0x00);
+
+    /************************************右边线的补线处理（跟左边线处理思路一模一样）注释略*************************************************/
+    if (ExtenRFlag != 'F' && Right_Corner > ImageStatus.OFFLine &&
+        Right_Corner < LCDH && ImageDeal[Right_Corner].IsRightFind == 'T' &&
+        ImageDeal[Right_Corner].RightBorder > 1 &&
+        ImageDeal[Right_Corner].RightBorder < LCDW-2)
+        for (Ysite = LCDH-10; Ysite >= (ImageStatus.OFFLine + 4);Ysite--)
+        {
+          PicTemp = Pixle[Ysite];//存当前行
+          if (ImageDeal[Ysite].IsRightFind =='W'&&Ysite<60)
+          {
+            if (ImageDeal[Ysite + 1].RightBorder <= 10)
+            {
+              ImageStatus.OFFLine =Ysite + 1;
+              break;
+            }
+            while (Ysite >= (ImageStatus.OFFLine + 4))
+            {
+              Ysite--;
+              if (ImageDeal[Ysite].IsRightFind == 'T'
+                  &&ImageDeal[Ysite - 1].IsRightFind == 'T'
+                  &&ImageDeal[Ysite - 2].IsRightFind == 'T'
+                          && Ysite - 5 > ImageStatus.OFFLine + 5    //先检查实际使用的上端点行号
+                          && Ysite - 5 < Right_Corner
+                          && ImageDeal[Ysite - 5].IsRightFind == 'T'
+                          && ImageDeal[Ysite - 5].RightBorder > 1
+                          && ImageDeal[Ysite - 5].RightBorder < LCDW-2
+                  /*&&ImageDeal[Ysite - 2].RightBorder < LCDW-1
+                  &&ImageDeal[Ysite - 2].RightBorder > 10*/
+                  )
+              {
+                  right_FTSite = Ysite - 5;
+//                  if(Buxian_Flag_R==1)
 //                  {
-//                    ImageDeal[ytemp].RightBorder =(int)(DetR * ((float)(ytemp - Cross_Corner_R))) +ImageDeal[Cross_Corner_R].RightBorder;
+//                      right_FTSite=Ysite;
 //                  }
-//                  Ysite=(ImageStatus.OFFLine + 4)-1;                        //减一停止外层的循环，因为有可能遇到双十字，以底部十字补线一次即可
-//            }
-//           }
-//         }
-//       /************************************右边线的补线处理（跟左边线处理思路一模一样）注释略*************************************************/
-// 
-// 
+                break;
+              }
+            }
+           if (right_FTSite > ImageStatus.OFFLine+5)
+           {
+                  DetR =((float)(ImageDeal[right_FTSite].RightBorder -ImageDeal[Right_Corner].RightBorder)) /((float)(right_FTSite - Right_Corner));
+                 for (ytemp = Right_Corner; ytemp >= right_FTSite;ytemp--)
+                 {
+                   ImageDeal[ytemp].RightBorder =(int)(DetR * ((float)(ytemp - Right_Corner))) +ImageDeal[Right_Corner].RightBorder;
+                 }
+                 Ysite=(ImageStatus.OFFLine + 4)-1;                        //减一停止外层的循环，因为有可能遇到双十字，以底部十字补线一次即可
+           }
+          }
+        }
+      /************************************右边线的补线处理（跟左边线处理思路一模一样）注释略*************************************************/
+
+
+   /*****************************************所有的补线处理结束，把中线和赛道宽度信息再更新一遍******************************************************/
+        if(left_FTSite != 0 && right_FTSite != 0)
+        {
+            for (Ysite = LCDH-1; Ysite >= ImageStatus.OFFLine; Ysite--)
+            {
+                ImageDeal[Ysite].Center =(ImageDeal[Ysite].LeftBorder+ImageDeal[Ysite].RightBorder)/2;
+                ImageDeal[Ysite].Wide =ImageDeal[Ysite].RightBorder-ImageDeal[Ysite].LeftBorder ;
+
+            }
+
+        }
+
+        if((right_FTSite-left_FTSite) > 5)
+        {
+//            BeeOn;
+            for (Ysite = LCDH-1; Ysite >= ImageStatus.OFFLine; Ysite--)
+            {
+                ImageDeal[Ysite].Center =ImageDeal[Ysite].RightBorder - Half_Road_Wide[Ysite];
+            }
+        }
+        if((left_FTSite-right_FTSite) > 5)
+        {
+            for (Ysite = LCDH-1; Ysite >= ImageStatus.OFFLine; Ysite--)
+            {
+                ImageDeal[Ysite].Center =ImageDeal[Ysite].LeftBorder + Half_Road_Wide[Ysite];
+            }
+        }
+
+//    ImageFlag.Cross_Flag=0;
+//    BeeOff;
 //    /*****************************************所有的补线处理结束，把中线和赛道宽度信息再更新一遍******************************************************/
-//         if(left_FTSite != 0 && right_FTSite != 0)
-//         {
-//             for (Ysite = LCDH-1; Ysite >= ImageStatus.OFFLine; Ysite--)
-//             {
-//                 ImageDeal[Ysite].Center =(ImageDeal[Ysite].LeftBorder+ImageDeal[Ysite].RightBorder)/2;
-//                 ImageDeal[Ysite].Wide =ImageDeal[Ysite].RightBorder-ImageDeal[Ysite].LeftBorder ;
-// 
-//             }
-// 
-//         }
-// 
-//         if((right_FTSite-left_FTSite) > 5)
-//         {
-// //            BeeOn;
-//             for (Ysite = LCDH-1; Ysite >= ImageStatus.OFFLine; Ysite--)
-//             {
-//                 ImageDeal[Ysite].Center =ImageDeal[Ysite].RightBorder - Half_Road_Wide[Ysite];
-//             }
-//         }
-//         if((left_FTSite-right_FTSite) > 5)
-//         {
-//             for (Ysite = LCDH-1; Ysite >= ImageStatus.OFFLine; Ysite--)
-//             {
-//                 ImageDeal[Ysite].Center =ImageDeal[Ysite].LeftBorder + Half_Road_Wide[Ysite];
-//             }
-//         }
-// 
-// //    ImageFlag.Cross_Flag=0;
-// //    BeeOff;
-// //    /*****************************************所有的补线处理结束，把中线和赛道宽度信息再更新一遍******************************************************/
-// }
+}
+
+#else
 
 /* 新十字补线：上方连续实测边线拟合，向下延长到第LCDH-2行。 */
 /* Upper-road fitting parameters for the current 70 x 160 image. */
@@ -1789,6 +1836,7 @@ void Search_Border_OTSU(uint8 imageInput[LCDH][LCDW], uint8 Row, uint8 Col, uint
 #define CROSS_EXT_WIDTH_MAX     ((float)(LCDW - 5)) // 补线后每行允许的最大道路宽度，单位：像素
 
 
+#define CROSS_EXT_INNER_ROWS     2      /* 连续两行发现更靠内的边线，就重新选边 */
 #define CROSS_EXT_RECOVER_BLACK  4      /* 重搜时忽略较短黑点 */
 #define CROSS_EXT_RECOVER_AGREE  5      /* 两种重搜结果的允许列差 */
 #define CROSS_EXT_LEFT           0
@@ -1840,10 +1888,36 @@ static uint8 CrossExt_GetMeasuredPoint(int side, int y, int *point_x)
     return 1;
 }
 
-/* 重搜从已验证的另一侧白点出发，遇到第一段连续黑区就停止。 */
+/* 从白路上的已知点向另一侧搜，返回第一段连续黑区前的白点。 */
+static int CrossExt_FindInnerBorder(int Ysite, int Start_Xsite, int Step, int Scan_Width)
+{
+    int Xsite, Distance;
+    int Black_Num = 0;
+
+    for (Distance = 1; Distance <= Scan_Width; Distance++)
+    {
+        Xsite = Start_Xsite + Step * Distance;
+        if (Xsite <= 0 || Xsite >= LCDW - 1)
+        {
+            break;
+        }
+
+        if (Pixle[Ysite][Xsite] == 255)
+        {
+            Black_Num = 0;
+        }
+        else if (++Black_Num >= CROSS_EXT_RECOVER_BLACK)
+        {
+            return Start_Xsite + Step * (Distance - Black_Num);
+        }
+    }
+    return -1;                                                //这段范围内没有找到边界
+}
+
+/* 十字断口上方重搜边线，只在该行的合理路宽范围内取点。 */
 static uint8 CrossExt_GetPoint(int source, int y, int *point_x)
 {
-    int anchor, x, step, distance, dark_run = 0;
+    int anchor, x, step;
     int width, min_width, max_width;
 
     if (source == CROSS_EXT_LEFT || source == CROSS_EXT_RIGHT)
@@ -1860,30 +1934,16 @@ static uint8 CrossExt_GetPoint(int source, int y, int *point_x)
         min_width = (int)CROSS_EXT_WIDTH_MIN;
     max_width = width + width / 2;
 
-    for (distance = 1; distance <= max_width + CROSS_EXT_RECOVER_BLACK; distance++)
-    {
-        x = anchor + step * distance;
-        if (x <= 0 || x >= LCDW - 1)
-            break;
+    x = CrossExt_FindInnerBorder(y, anchor, step, max_width + CROSS_EXT_RECOVER_BLACK);
+    if (x < CROSS_EXT_EDGE_MIN || x > CROSS_EXT_EDGE_MAX)
+        return 0;
 
-        if (Pixle[y][x] == 255)
-        {
-            dark_run = 0;
-            continue;
-        }
+    width = (x - anchor) * step;
+    if (width < min_width || width > max_width)
+        return 0;
 
-        if (++dark_run >= CROSS_EXT_RECOVER_BLACK)
-        {
-            width = distance - dark_run;
-            x = anchor + step * width;
-            if (width < min_width || width > max_width ||
-                x < CROSS_EXT_EDGE_MIN || x > CROSS_EXT_EDGE_MAX)
-                return 0;
-            *point_x = x;
-            return 1;
-        }
-    }
-    return 0;
+    *point_x = x;
+    return 1;
 }
 
 /* Fit x = k*y + b using every measured row in the inclusive interval. */
@@ -2033,6 +2093,125 @@ static uint8 CrossExt_ValidatePair(const CrossExtFit *left_fit,
     return 1;
 }
 
+/* 如果白路在实测边线之前已经结束，外侧的边线不能拿来配对。 */
+static uint8 CrossExt_HasInnerBorder(int Start_Ysite, int End_Ysite)
+{
+    int Ysite, Left_Xsite, Right_Xsite, Inner_Xsite, Wide;
+    int Left_Inner_Num = 0;
+    int Right_Inner_Num = 0;
+
+    for (Ysite = Start_Ysite; Ysite <= End_Ysite; Ysite++)
+    {
+        if (!CrossExt_GetMeasuredPoint(CROSS_EXT_LEFT, Ysite, &Left_Xsite) ||
+            !CrossExt_GetMeasuredPoint(CROSS_EXT_RIGHT, Ysite, &Right_Xsite))
+        {
+            Left_Inner_Num = 0;
+            Right_Inner_Num = 0;
+            continue;
+        }
+
+        Wide = Right_Xsite - Left_Xsite;
+        Inner_Xsite = CrossExt_FindInnerBorder(Ysite, Left_Xsite, 1, Wide);
+        if (Inner_Xsite >= 0 && Right_Xsite - Inner_Xsite > CROSS_EXT_RECOVER_AGREE)
+            Right_Inner_Num++;
+        else
+            Right_Inner_Num = 0;
+
+        Inner_Xsite = CrossExt_FindInnerBorder(Ysite, Right_Xsite, -1, Wide);
+        if (Inner_Xsite >= 0 && Inner_Xsite - Left_Xsite > CROSS_EXT_RECOVER_AGREE)
+            Left_Inner_Num++;
+        else
+            Left_Inner_Num = 0;
+
+        if (Left_Inner_Num >= CROSS_EXT_INNER_ROWS || Right_Inner_Num >= CROSS_EXT_INNER_ROWS)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* 十字断口上方，沿着左边线右侧的白路找右边线。 */
+static uint8 CrossExt_FindPairFromLeft(CrossExtFit *Left_Fit,
+                                      CrossExtFit *Right_Fit, int *First_Row)
+{
+    CrossExtFit Left_Candidate, Right_Candidate;
+    int Ysite, Near_Ysite, Start_Ysite;
+    int Left_Xsite, Right_Xsite, Old_Right_Xsite;
+    int Last_Left = 0, Last_Right = 0;
+    int Left_Gap = 0, Right_Gap = 0;
+    int Line_Num = 0, Inner_Ysite = -1, Last_Inner_Ysite = -1;
+    uint8 Gap_Found = 0, Pair_Found = 0, Inner_Found;
+
+    for (Ysite = LCDH - 6; Ysite > ImageStatus.OFFLine; Ysite--)
+    {
+        if (!Gap_Found)
+        {
+            if (ImageDeal[Ysite].IsLeftFind == 'W' || ImageDeal[Ysite].IsLeftFind == 'H')
+                Left_Gap++;
+            else
+                Left_Gap = 0;
+
+            if (ImageDeal[Ysite].IsRightFind == 'W' || ImageDeal[Ysite].IsRightFind == 'H')
+                Right_Gap++;
+            else
+                Right_Gap = 0;
+
+            if (Left_Gap >= CROSS_EXT_GAP_ROWS || Right_Gap >= CROSS_EXT_GAP_ROWS)
+                Gap_Found = 1;
+            continue;
+        }
+
+        if (!CrossExt_GetMeasuredPoint(CROSS_EXT_LEFT, Ysite, &Left_Xsite) ||
+            !CrossExt_GetPoint(CROSS_EXT_RECOVER_RIGHT, Ysite, &Right_Xsite))
+        {
+            Line_Num = 0;
+            continue;
+        }
+
+        if (Line_Num > 0 &&
+            (abs(Left_Xsite - Last_Left) > CROSS_EXT_STEP_MAX ||
+             abs(Right_Xsite - Last_Right) > CROSS_EXT_STEP_MAX))
+        {
+            Line_Num = 0;                                      //跳到另一条边线了，从本行重新数
+        }
+        Last_Left = Left_Xsite;
+        Last_Right = Right_Xsite;
+        Line_Num++;
+
+        if (CrossExt_GetMeasuredPoint(CROSS_EXT_RIGHT, Ysite, &Old_Right_Xsite) &&
+            Old_Right_Xsite - Right_Xsite > CROSS_EXT_RECOVER_AGREE)
+        {
+            Last_Inner_Ysite = Inner_Ysite;
+            Inner_Ysite = Ysite;
+        }
+
+        if (Line_Num < CROSS_EXT_FIT_ROWS)
+            continue;
+
+        Near_Ysite = Ysite + CROSS_EXT_FIT_ROWS - 1;
+        Inner_Found = Inner_Ysite >= Ysite && Last_Inner_Ysite <= Near_Ysite &&
+                      Last_Inner_Ysite == Inner_Ysite + 1;
+        if (Pair_Found && !Inner_Found)
+            continue;
+
+        if (CrossExt_FitRange(CROSS_EXT_LEFT, Ysite, Near_Ysite, &Left_Candidate) &&
+            CrossExt_FitRange(CROSS_EXT_RECOVER_RIGHT, Ysite, Near_Ysite, &Right_Candidate) &&
+            CrossExt_ValidatePair(&Left_Candidate, &Right_Candidate, &Start_Ysite))
+        {
+            *Left_Fit = Left_Candidate;
+            *Right_Fit = Right_Candidate;
+            *First_Row = Start_Ysite;
+            Pair_Found = 1;
+
+            /* 先留最近的可用配对，找到被原右线漏掉的内侧边就优先用内侧。 */
+            if (Inner_Found)
+                break;
+        }
+    }
+    return Pair_Found;
+}
+
 static uint8 CrossExt_FitsAgree(const CrossExtFit *a, const CrossExtFit *b, int y)
 {
     float difference = (a->k - b->k) * (float)y + a->b - b->b;
@@ -2052,47 +2231,54 @@ void Get_ExtensionLine(void)
         ImageFlag.Zebra_Flag != 0)
         return;
 
-    left_found = CrossExt_FindUpper(CROSS_EXT_LEFT, &left_fit);
-    right_found = CrossExt_FindUpper(CROSS_EXT_RIGHT, &right_fit);
-
-    if (!(left_found && right_found &&
-          CrossExt_ValidatePair(&left_fit, &right_fit, &first_row)))
+    /* 优先按左边线、白路、右侧黑块的顺序配对。 */
+    if (!CrossExt_FindPairFromLeft(&left_fit, &right_fit, &first_row))
     {
-        /* 两个方向独立重搜，使用锚点拟合区相同的行。 */
-        from_left = left_found &&
-                    CrossExt_FitRange(CROSS_EXT_RECOVER_RIGHT, left_fit.far_row,
-                                      left_fit.near_row, &recovered_right) &&
-                    CrossExt_ValidatePair(&left_fit, &recovered_right,
-                                          &start_from_left);
-        from_right = right_found &&
-                     CrossExt_FitRange(CROSS_EXT_RECOVER_LEFT, right_fit.far_row,
-                                       right_fit.near_row, &recovered_left) &&
-                     CrossExt_ValidatePair(&recovered_left, &right_fit,
-                                           &start_from_right);
+        left_found = CrossExt_FindUpper(CROSS_EXT_LEFT, &left_fit);
+        right_found = CrossExt_FindUpper(CROSS_EXT_RIGHT, &right_fit);
 
-        if (!from_left && !from_right)
-            return;
-
-        /* 两边各自找到不同白路时，当前帧缺少可确定的配对。 */
-        if (from_left && from_right)
+        /* 两侧几何合格后，还要看共同拟合区里是否存在更靠内的边线。 */
+        if (!(left_found && right_found &&
+              CrossExt_ValidatePair(&left_fit, &right_fit, &first_row) &&
+              !CrossExt_HasInnerBorder(first_row, left_fit.near_row < right_fit.near_row ?
+                                                left_fit.near_row : right_fit.near_row)))
         {
-            prospect = (int)Vision_ProspectRow[VP_CROSS];
-            if (!CrossExt_FitsAgree(&left_fit, &recovered_left, prospect) ||
-                !CrossExt_FitsAgree(&right_fit, &recovered_right, prospect) ||
-                !CrossExt_FitsAgree(&left_fit, &recovered_left, LCDH - 2) ||
-                !CrossExt_FitsAgree(&right_fit, &recovered_right, LCDH - 2))
+            /* 两个方向独立重搜，使用锚点拟合区相同的行。 */
+            from_left = left_found &&
+                        CrossExt_FitRange(CROSS_EXT_RECOVER_RIGHT, left_fit.far_row,
+                                          left_fit.near_row, &recovered_right) &&
+                        CrossExt_ValidatePair(&left_fit, &recovered_right,
+                                              &start_from_left);
+            from_right = right_found &&
+                         CrossExt_FitRange(CROSS_EXT_RECOVER_LEFT, right_fit.far_row,
+                                           right_fit.near_row, &recovered_left) &&
+                         CrossExt_ValidatePair(&recovered_left, &right_fit,
+                                               &start_from_right);
+
+            if (!from_left && !from_right)
                 return;
-        }
 
-        if (from_left)
-        {
-            right_fit = recovered_right;
-            first_row = start_from_left;
-        }
-        else
-        {
-            left_fit = recovered_left;
-            first_row = start_from_right;
+            /* 两边各自找到不同白路时，当前帧缺少可确定的配对。 */
+            if (from_left && from_right)
+            {
+                prospect = (int)Vision_ProspectRow[VP_CROSS];
+                if (!CrossExt_FitsAgree(&left_fit, &recovered_left, prospect) ||
+                    !CrossExt_FitsAgree(&right_fit, &recovered_right, prospect) ||
+                    !CrossExt_FitsAgree(&left_fit, &recovered_left, LCDH - 2) ||
+                    !CrossExt_FitsAgree(&right_fit, &recovered_right, LCDH - 2))
+                    return;
+            }
+
+            if (from_left)
+            {
+                right_fit = recovered_right;
+                first_row = start_from_left;
+            }
+            else
+            {
+                left_fit = recovered_left;
+                first_row = start_from_right;
+            }
         }
     }
 
@@ -2107,6 +2293,8 @@ void Get_ExtensionLine(void)
         ImageDeal[y].Center = (left + right) / 2;
     }
 }
+
+#endif
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
 //  @name           Straight_Judge
