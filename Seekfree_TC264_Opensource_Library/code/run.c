@@ -476,7 +476,7 @@ static void run_enter_state(run_state_enum state)
     run_recovery_frame_sequence = 0;
     run_recovery_pending = 0;
     run_recovery_valid_count = 0;
-    run_recovery_limit = 170;
+    // run_recovery_limit = 170;
     run_recovery_mid_error = 0;
     if (RUN_STATE_FAULT == state)
         run_toggle_request = 0;
@@ -714,23 +714,23 @@ static int16 run_calc_recovery_speed_limit(const run_vision_struct *vision, int1
         limit = vision->line_lost ? RUN_SPEED_LINE_LOST_LIMIT : RUN_SPEED_UNKNOWN_LIMIT;
         if (run_planned_speed > 0 && run_planned_speed < limit)
             limit = run_planned_speed;
-        if (run_recovery_pending && run_recovery_limit < limit)
-            limit = run_recovery_limit;
-        run_recovery_limit = limit;
+        // if (run_recovery_pending && run_recovery_limit < limit)
+        //     limit = run_recovery_limit;
+        // run_recovery_limit = limit;
         run_recovery_pending = 1;
         run_recovery_valid_count = 0;
         run_recovery_frame_sequence = vision->frame_sequence;
         return user_limit < limit ? user_limit : limit;
     }
-    if (vision->cross)
-    {
-        if (!run_recovery_pending || run_recovery_limit > 170)
-            run_recovery_limit = 170;
-        run_recovery_pending = 1;
-        run_recovery_valid_count = 0;
-        run_recovery_frame_sequence = vision->frame_sequence;
-        return user_limit;
-    }
+    // if (vision->cross)
+    // {
+    //     if (!run_recovery_pending || run_recovery_limit > 170)
+    //         run_recovery_limit = 170;
+    //     run_recovery_pending = 1;
+    //     run_recovery_valid_count = 0;
+    //     run_recovery_frame_sequence = vision->frame_sequence;
+    //     return user_limit;
+    // }
     if (run_recovery_pending && vision->frame_sequence != run_recovery_frame_sequence)
     {
         run_recovery_frame_sequence = vision->frame_sequence;
@@ -743,8 +743,8 @@ static int16 run_calc_recovery_speed_limit(const run_vision_struct *vision, int1
         if (run_recovery_valid_count >= 3)
             run_recovery_pending = 0;
     }
-    if (run_recovery_pending && run_recovery_limit < user_limit)
-        return run_recovery_limit;
+    // if (run_recovery_pending && run_recovery_limit < user_limit)
+    //     return run_recovery_limit;
     return user_limit;
 }
 
