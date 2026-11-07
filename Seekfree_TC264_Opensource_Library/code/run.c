@@ -924,13 +924,10 @@ static void run_direction_tick_10ms(void)
                 run_start_pending = 0;
             else if (RUN_TOGGLE_SPEED_TEST == keys)
             {
-                // 检测只启动速度环，舵机保持中位，目标为零时保持停车。
-                if (run_speed_test_target > 0)
-                {
-                    run_request_start();
-                    run_speed_test_active = 1;
-                    run_planned_speed = run_speed_test_target;
-                }
+                // 检测只启动速度环，舵机保持中位，零目标也参与闭环。
+                run_request_start();
+                run_speed_test_active = 1;
+                run_planned_speed = run_speed_test_target;
             }
             else
             {

@@ -409,7 +409,7 @@ static void ui_draw_values(const run_monitor_t *m)
         else
         {
             ui_text(216, "K3 -%d / K4 +%d cm/s", UI_SPEED_TEST_STEP, UI_SPEED_TEST_STEP);
-            hint = m->speed_test_target > 0 ? "K1 starts speed test" : "Set speed above 0 to start";
+            hint = "K1 starts speed test";
         }
         ui_text(240, "%s", hint);
     }
