@@ -41,6 +41,7 @@ extern uint8 Image_iError_Flag;
 extern int8 Error_change_flag;
 extern uint16 position;
 extern uint32 Ramp_num;
+extern int Point_Ysite;
 extern float Cross_white_line;                              //十字双丢边行阈值条件
 extern uint8 NO_zhidao_add_flag;
 extern int right_ring_num;

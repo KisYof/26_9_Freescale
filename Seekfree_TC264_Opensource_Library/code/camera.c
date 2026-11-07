@@ -2931,7 +2931,7 @@ void Element_Handle_Left_Rings()
         ImageFlag.image_element_rings_flag = 5;//左边线丢失数明显减少，车已经进入环岛区域，状态5
     }
 
-            Small_Rings_HalfWide_Offset=5;
+            Small_Rings_HalfWide_Offset=13;
     //进环
     if(ImageFlag.image_element_rings_flag == 5 && ImageStatus.Miss_Right_lines>15)//
     {
@@ -3149,7 +3149,7 @@ void Element_Handle_Right_Rings()
     //大小圆环判断
     if(ImageFlag.image_element_rings_flag == 5)
     {
-        Small_Rings_HalfWide_Offset=5;
+        Small_Rings_HalfWide_Offset=13;
     }
 //    进环
     if(ImageFlag.image_element_rings_flag == 5 && ImageStatus.Miss_Left_lines>15)
