@@ -164,28 +164,20 @@ uint8 Half_Ring_Wide_small[LCDH]=
 #define VP_RING_INSIDE_BIG    5
 #define VP_RING_EXIT          6
 #define VP_COUNT              7
-
-#define VP_NORMAL_ROW          27  // 普通赛道固定前瞻行
-#define VP_DYNAMIC_NEAR_ROW    35  // 普通赛道最近前瞻行
-#define VP_DYNAMIC_SLOPE_START 120  // 斜率绝对值（放大1000倍），超过该值开始收近
-#define VP_DYNAMIC_SLOPE_FULL  800  // 达到此值时目标行收至最近
-#define VP_DYNAMIC_STEP_NEAR   2    // 每帧向近处最多移动的行数
-#define VP_DYNAMIC_STEP_FAR    1    // 每帧向远处最多移动的行数
 //建立元素前瞻行参数表
 static const uint8 Vision_ProspectRow[VP_COUNT] =
 {
-    VP_NORMAL_ROW,  // 普通赛道
+    26,     // 普通赛道
     40,     // 十字：看中间
     35,     // 斑马线
     30,     // 圆环入口
-    47,     // 圆环内部
+    43,     // 圆环内部
     50,     // 大圆环内部
     30      // 圆环出口
 };
 
 uint8 ControlProspectType = VP_NORMAL;
 uint8 ControlProspectRow  = 26;
-static uint8 Vision_DynamicProspectRow = VP_NORMAL_ROW;
 
 /*其他*/
 #define LimitP_L(x) (x=((x>ImageStatus.OFFLine)?x:(ImageStatus.OFFLine+2)))//对图像的前瞻进行限制，不要超过扫线截止行（后续用动态前瞻控制行的时候那里限制，这里删掉）
@@ -217,7 +209,6 @@ static void Camera_ClearRuntimeState(void)
     ControlMidValid = 0;
     Track_Slope_x1000 = 0;
     Track_SlopeValid = 0;
-    Vision_DynamicProspectRow = VP_NORMAL_ROW;
 
     LineLostCount = 0;
     LineLostFlag = 0;
@@ -1279,7 +1270,7 @@ void NormalMid_Update(void)
     
 }
 /*------------------------------------------------------------------------------------------------------------------
- * @name           Track_Slope_Sample
+ * @name           Track_Slope_Update
  *
  * @brief          计算轨道斜率
  *
@@ -1297,7 +1288,7 @@ void NormalMid_Update(void)
 #define SLOPE_FAR_END      38
 
 
-static uint8 Track_Slope_Sample(int16 *sample)
+void Track_Slope_Update(void)
 {
     int y;
 
@@ -1312,6 +1303,15 @@ static uint8 Track_Slope_Sample(int16 *sample)
     int dy;
 
     int32_t slope;
+
+    Track_SlopeValid = 0;
+    Track_Slope_x1000 = 0;
+
+    // 正常中线无效，不给控制组斜率
+    if (ControlMidValid == 0)
+    {
+        return;
+    }
 
     // 计算近端平均中线
     for (y = SLOPE_NEAR_START; y <= SLOPE_NEAR_END; y++)
@@ -1336,7 +1336,7 @@ static uint8 Track_Slope_Sample(int16 *sample)
     // 有效中线点太少，不计算斜率
     if (near_cnt < 2 || far_cnt < 2)
     {
-        return 0;
+        return;
     }
 
     near_x = near_sum / near_cnt;
@@ -1347,7 +1347,7 @@ static uint8 Track_Slope_Sample(int16 *sample)
 
     if (dy <= 0)
     {
-        return 0;
+        return;
     }
 
     // 斜率放大1000倍，避免控制层频繁用浮点
@@ -1363,24 +1363,8 @@ static uint8 Track_Slope_Sample(int16 *sample)
         slope = -5000;
     }
 
-    *sample = (int16)slope;
-    return 1;
-}
-
-static void Track_Slope_Publish(uint8 sample_valid, int16 slope)
-{
-    /* 控制中线有效时才给控制组使用本帧斜率 */
-    uint8 valid = ControlMidValid && sample_valid;
-    Track_Slope_x1000 = valid ? slope : 0;
-    Track_SlopeValid = valid;
-}
-
-void Track_Slope_Update(void)
-{
-    int16 slope = 0;
-    uint8 sample_valid = ControlMidValid && Track_Slope_Sample(&slope);
-
-    Track_Slope_Publish(sample_valid, slope);
+    Track_Slope_x1000 = (int16)slope;
+    Track_SlopeValid = 1;
 }
 
 
@@ -3436,133 +3420,26 @@ static uint8 ControlMid_SelectNearbyReference(int preferred_row, int *selected_r
     return 0;
 }
 
-// @name  Vision_SelectDynamicProspectRow
-// @brief 根据斜率绝对值调整普通赛道前瞻行，斜率越大越靠近车头。
-// @note  行号越大越近，进弯收近和出弯回远分别限制每帧步长。
-static int Vision_SelectDynamicProspectRow(int16 slope)
-{
-    const int slope_span = VP_DYNAMIC_SLOPE_FULL - VP_DYNAMIC_SLOPE_START;
-    const int row_span = VP_DYNAMIC_NEAR_ROW - VP_NORMAL_ROW;
-    int slope_abs = slope < 0 ? -(int)slope : slope;
-    int slope_delta = slope_abs - VP_DYNAMIC_SLOPE_START;
-    int target_row;
-
-    if (slope_delta < 0)
-    {
-        slope_delta = 0;
-    }
-    else if (slope_delta > slope_span)
-    {
-        slope_delta = slope_span;
-    }
-
-    /* 整数线性插值，取最近的整数行 */
-    target_row = VP_NORMAL_ROW + (row_span * slope_delta + slope_span / 2) / slope_span;
-    if (target_row > Vision_DynamicProspectRow + VP_DYNAMIC_STEP_NEAR)
-    {
-        target_row = Vision_DynamicProspectRow + VP_DYNAMIC_STEP_NEAR;
-    }
-    else if (target_row < Vision_DynamicProspectRow - VP_DYNAMIC_STEP_FAR)
-    {
-        target_row = Vision_DynamicProspectRow - VP_DYNAMIC_STEP_FAR;
-    }
-
-    return target_row;
-}
-
-// @name  ControlMid_ReadReference
-// @brief 读取指定前瞻行的中线参考，普通道路和十字要求当前白路支撑。
-static uint8 ControlMid_ReadReference(int row, uint8 require_white_road, int *value)
+void ControlMid_Update(void)
 {
     int i;
     int start;
     int end;
     int sum;
     int cnt;
-
-    /* 3. 先取控制行附近三行 */
-    start = row - 1;
-    end   = row + 1;
-
-    if (start < 0)
-    {
-        start = 0;
-    }
-
-    if (end >= LCDH)
-    {
-        end = LCDH - 1;
-    }
-
-    sum = 0;
-    cnt = 0;
-
-    for (i = start; i <= end; i++)
-    {
-        if (ControlMidLine[i] >= 0)
-        {
-            sum += ControlMidLine[i];
-            cnt++;
-        }
-    }
-
-    /* 4. 附近不够，再扩大到上下5行 */
-    if (cnt == 0)
-    {
-        start = row - 5;
-        end   = row + 5;
-
-        if (start < 0)
-        {
-            start = 0;
-        }
-
-        if (end >= LCDH)
-        {
-            end = LCDH - 1;
-        }
-
-        for (i = start; i <= end; i++)
-        {
-            if (ControlMidLine[i] >= 0)
-            {
-                sum += ControlMidLine[i];
-                cnt++;
-            }
-        }
-    }
-
-    if (cnt == 0 || (require_white_road && (cnt < 2 || Pixle[row][sum / cnt] != 255)))
-    {
-        return 0;
-    }
-
-    *value = sum / cnt;
-    return 1;
-}
-
-void ControlMid_Update(void)
-{
-    int i;
     int center;
     int left;
     int right;
     int wide;
-    int fixed_row;
-    int row;
-    int value;
-    int16 slope = 0;
 
     uint8 ring_active;
-    uint8 require_white_road;
-    uint8 slope_valid;
-    uint8 reference_supported = 0;
+    uint8 reference_supported;
+    int nearby_row, nearby_value;
 
     ControlMidValid = 0;
     ControlMidError = 0;
 
     ring_active = (ImageFlag.image_element_rings != 0);
-    require_white_road = !ring_active && !ImageFlag.Zebra_Flag;
 
     /* 1. 先生成每一行的控制中线 */
     for (i = 0; i < LCDH; i++)
@@ -3604,45 +3481,78 @@ void ControlMid_Update(void)
 
     /* 2. 根据元素状态选择控制行 */
     ControlProspectType = Vision_SelectProspectType();
-    fixed_row = Vision_ProspectRow[ControlProspectType];
+    ControlProspectRow  = Vision_ProspectRow[ControlProspectType];
 
-    if (fixed_row >= LCDH)
+    if (ControlProspectRow >= LCDH)
     {
-        fixed_row = LCDH - 1;
+        ControlProspectRow = LCDH - 1;
     }
 
-    /* 普通赛道用本帧斜率调整前瞻行，坡道和避障仍用固定行。 */
-    row = fixed_row;
-    slope_valid = Track_Slope_Sample(&slope);
-    if (ControlProspectType == VP_NORMAL && slope_valid &&
-        !ImageFlag.Ramp && !ImageFlag.SmallBlock)
+    /* 3. 先取控制行附近三行 */
+    start = (int)ControlProspectRow - 1;
+    end   = (int)ControlProspectRow + 1;
+
+    if (start < 0)
     {
-        row = Vision_SelectDynamicProspectRow(slope);
-        if (row != fixed_row && ControlMid_ReadReference(row, require_white_road, &value))
+        start = 0;
+    }
+
+    if (end >= LCDH)
+    {
+        end = LCDH - 1;
+    }
+
+    sum = 0;
+    cnt = 0;
+
+    for (i = start; i <= end; i++)
+    {
+        if (ControlMidLine[i] >= 0)
         {
-            Vision_DynamicProspectRow = (uint8)row;
-            reference_supported = 1;
+            sum += ControlMidLine[i];
+            cnt++;
         }
     }
 
-    /* 动态行无可靠参考时，回到固定行及其近侧白路。 */
-    if (!reference_supported)
+    /* 4. 附近不够，再扩大到上下5行 */
+    if (cnt == 0)
     {
-        Vision_DynamicProspectRow = VP_NORMAL_ROW;
-        row = fixed_row;
-        reference_supported = ControlMid_ReadReference(row, require_white_road, &value);
+        start = (int)ControlProspectRow - 5;
+        end   = (int)ControlProspectRow + 5;
 
-        /* 原固定行优先；失效时只接受近侧连续三行支持的真实白路。 */
-        if (require_white_road && !reference_supported)
+        if (start < 0)
         {
-            reference_supported = ControlMid_SelectNearbyReference(row, &row, &value);
+            start = 0;
+        }
+
+        if (end >= LCDH)
+        {
+            end = LCDH - 1;
+        }
+
+        for (i = start; i <= end; i++)
+        {
+            if (ControlMidLine[i] >= 0)
+            {
+                sum += ControlMidLine[i];
+                cnt++;
+            }
         }
     }
 
-    ControlProspectRow = (uint8)row;
-    if (reference_supported)
+    /* 原固定行优先；失效时只接受近侧连续三行支持的真实白路。 */
+    reference_supported = cnt >= 2 && Pixle[ControlProspectRow][sum / cnt] == 255;
+    if (!ring_active && !ImageFlag.Zebra_Flag && !reference_supported &&
+        ControlMid_SelectNearbyReference((int)ControlProspectRow, &nearby_row, &nearby_value))
     {
-        ControlMidValue = value;
+        ControlProspectRow = (uint8)nearby_row;
+        sum = nearby_value;
+        cnt = 1;
+        reference_supported = 1;
+    }
+    if (cnt > 0 && (ring_active || ImageFlag.Zebra_Flag || reference_supported))
+    {
+        ControlMidValue = sum / cnt;
         ControlMidError = ImageSensorMid - ControlMidValue;
         ControlMidValid = 1;
     }
@@ -3652,8 +3562,6 @@ void ControlMid_Update(void)
         ControlMidError = 0;
         ControlMidValid = 0;
     }
-
-    Track_Slope_Publish(slope_valid, slope);
 }
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------
 //  @name           LineLost_Protection_Update
@@ -3795,6 +3703,8 @@ uint8 Image_Process(void)
           //保护计算
           LineLost_Protection_Update();
 
+          // 计算轨道斜率
+          Track_Slope_Update();
 
            //正常中线有效时，控制层使用正常中线误差
            if (ControlMidValid)
