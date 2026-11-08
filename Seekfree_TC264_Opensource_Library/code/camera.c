@@ -2763,15 +2763,15 @@ void Element_Handle_Cross()
 void Element_Judgement_Left_Rings()
 {
     //前置排除条件
-    if(  ImageStatus.Miss_Right_lines>5 || ImageStatus.Miss_Left_lines<10
-       ||ImageStatus.OFFLine>10 || Straight_Judge(2,10,60)>3 || ImageStatus.WhiteLine>4
+    if(  ImageStatus.Miss_Right_lines>4 || ImageStatus.Miss_Left_lines<10
+       ||ImageStatus.OFFLine>10 || Straight_Judge(2,10,60)>5 || ImageStatus.WhiteLine>4
        ||ImageDeal[62].IsLeftFind == 'W'
        ||ImageDeal[63].IsLeftFind == 'W'
        ||ImageDeal[64].IsLeftFind == 'W'
        ||ImageFlag.image_element_rings == 1
                )return;
 
-    int ring_ysite = 35;
+    int ring_ysite = 20;
         Left_RingsFlag_Point1_Ysite = 0;
         Left_RingsFlag_Point2_Ysite = 0;
     //第一个环岛特征点   寻找左边线第一次出现明显跳变的位置(相邻两行左边界突然变化超过4个像素)
@@ -2793,12 +2793,12 @@ void Element_Judgement_Left_Rings()
         }
     }
     //判断左边界是否有圆环形状
-    for (int Ysite = Left_RingsFlag_Point1_Ysite; Ysite > ImageStatus.OFFLine; Ysite--)
+    for (int Ysite = Left_RingsFlag_Point1_Ysite; Ysite > 10; Ysite--)
     {
         if (ImageDeal[Ysite + 6].LeftBorder < ImageDeal[Ysite+3].LeftBorder
             && ImageDeal[Ysite + 5].LeftBorder < ImageDeal[Ysite+3].LeftBorder
-            && ImageDeal[Ysite+3].LeftBorder > ImageDeal[Ysite + 2].LeftBorder
             && ImageDeal[Ysite+3].LeftBorder > ImageDeal[Ysite + 1].LeftBorder
+            && ImageDeal[Ysite+3].LeftBorder > ImageDeal[Ysite].LeftBorder
             )
         {
             Ring_Help_Flag = 1;
@@ -2814,12 +2814,10 @@ void Element_Judgement_Left_Rings()
             Ring_Help_Flag = 1;
     }
 
-    //最终确认条件：1.Point2 明显在 Point1 上面,并且 Ring_Help_Flag = 1
-    //2.右边线基本正常 左边线丢失超过20行 顶部扫描截止行较小 中线误差较小(说明左侧大面积，但车还在正常赛道方向，也可能是左环岛入口。)
-
-    /*if ((Left_RingsFlag_Point2_Ysite > Left_RingsFlag_Point1_Ysite+3 && Ring_Help_Flag == 1)
-            ||(ImageStatus.Miss_Right_lines<3&&ImageStatus.Miss_Left_lines>20&&ImageStatus.OFFLine < 10&&ImageStatus.Det_True<10))*/
-        if (Left_RingsFlag_Point1_Ysite > 0 && Left_RingsFlag_Point2_Ysite > 0 && Left_RingsFlag_Point2_Ysite > Left_RingsFlag_Point1_Ysite + 3 && Ring_Help_Flag == 1)
+    // 160 列图像以第 79 列为参考，左右翻转时误差变为 -误差 - 1。
+    if ((Left_RingsFlag_Point2_Ysite > Left_RingsFlag_Point1_Ysite + 3 && Ring_Help_Flag == 1)
+        || (ImageStatus.Miss_Right_lines < 3 && ImageStatus.Miss_Left_lines > 20
+            && ImageStatus.OFFLine < 10 && ImageStatus.Det_True >= -10))
     {
         ImageFlag.image_element_rings = 1;         // 左环岛
         ImageFlag.image_element_rings_flag = 1;    // 进入环岛流程
@@ -2913,7 +2911,7 @@ void Element_Handle_Left_Rings()
     int num = 0;
     for (int Ysite = 65; Ysite > 30; Ysite--)
     {
-        if(ImageDeal[Ysite].IsLeftFind == 'W')
+        if (ImageDeal[64].IsLeftFind == 'W' && ImageDeal[Ysite].IsLeftFind == 'W')
         {
             num++;
         }
@@ -2922,7 +2920,7 @@ void Element_Handle_Left_Rings()
             break;
     }
     //准备进环
-    if (ImageFlag.image_element_rings_flag == 1 && num>15)          //圆环底部黑色还没消失
+    if (ImageFlag.image_element_rings_flag == 1 && num>20)          //圆环底部黑色还没消失
     {
         ImageFlag.image_element_rings_flag = 2;//左环岛入口处左边线丢失很多，进入状态2
     }
@@ -2931,7 +2929,10 @@ void Element_Handle_Left_Rings()
         ImageFlag.image_element_rings_flag = 5;//左边线丢失数明显减少，车已经进入环岛区域，状态5
     }
 
-            Small_Rings_HalfWide_Offset=13;
+    if (ImageFlag.image_element_rings_flag == 5)
+    {
+        Small_Rings_HalfWide_Offset = 13;
+    }
     //进环
     if(ImageFlag.image_element_rings_flag == 5 && ImageStatus.Miss_Right_lines>15)//
     {
@@ -2967,7 +2968,7 @@ void Element_Handle_Left_Rings()
     //出环后
     if (ImageFlag.image_element_rings_flag == 8)
     {
-        if (    Straight_Judge(2, ImageStatus.OFFLine+15, 55) < 5
+        if (    Straight_Judge(2, ImageStatus.OFFLine+15, 60) < 5
              && ImageStatus.Miss_Right_lines < 8
              && ImageStatus.OFFLine < 10)                            //右边为直线且截止行（前瞻值）很小
         {
@@ -2991,7 +2992,6 @@ void Element_Handle_Left_Rings()
             ImageFlag.ring_big_small = 0;
             LRings_Size_get_Flag=0;
 //            Front_Ring_Continue_Count++;
-            BeeOff;
         }
     }
 
@@ -3008,24 +3008,26 @@ void Element_Handle_Left_Rings()
             int left = ImageDeal[Ysite].LeftBorder;
             int right = ImageDeal[Ysite].RightBorder;
             int wide = right - left;
+            /* 按 LCDW - 1 - x 镜像右环的有效列范围。 */
             int left_valid = (ImageDeal[Ysite].IsLeftFind == 'T' &&
-                              left > 2 && left < LCDW - 2);
+                              left >= 2 && left < LCDW - 3);
             int right_valid = (ImageDeal[Ysite].IsRightFind == 'T' &&
-                               right > 2 && right < LCDW - 2);
+                               right >= 2 && right < LCDW - 3);
             int center = ImageDeal[Ysite].Center;
 
             /* 必须实际找到两侧边线，才允许使用双边平均。 */
             if (left_valid && right_valid && wide >= 20 && wide <= 140)
             {
-                center = (left + right) / 2;
-            }
-            else if (right_valid)
-            {
-                center = right - Half_Road_Wide[Ysite];
+                /* 右环取整向左，镜像后取整向右。 */
+                center = (left + right + 1) / 2;
             }
             else if (left_valid)
             {
                 center = left + Half_Road_Wide[Ysite];
+            }
+            else if (right_valid)
+            {
+                center = right - Half_Road_Wide[Ysite];
             }
             /* 两侧都无效时，保留本帧普通搜线生成的中线。 */
 
