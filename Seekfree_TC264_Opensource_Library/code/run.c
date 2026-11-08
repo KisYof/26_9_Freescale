@@ -21,13 +21,13 @@
 #define RUN_STOP_SPEED_MAX (5)         // 双轮原始/滤波速度均在 ±5cm/s 内才计为接近静止
 #define RUN_STOP_CONFIRM_TICKS (50U)  // 2ms 速度任务：连续接近静止 100ms 后回空闲
 #define RUN_SPEED_ACCEL_STEP (10)       // 10ms 加速步长，保守初值，需实车标定
-#define RUN_SPEED_DECEL_STEP (30)       // 10ms 减速步长，必须大于加速步长，需实车标定
+#define RUN_SPEED_DECEL_STEP (60)       // 10ms 减速步长，必须大于加速步长，需实车标定
 #define RUN_RING_RELEASE_STEP (10) // 每个稳定新图像帧允许恢复的速度上限
 #define RUN_RING_RELEASE_MID (20)
 #define RUN_RING_RELEASE_DELTA (5)
 #define RUN_RING_RELEASE_RISK (400)
 #define SPEED_MID (350)                // 调试层默认目标速度
-#define STEER_OUTPUT_MAP_SCALE (0.42)  // 转向输出换算成舵机角的缩放系数
+#define STEER_OUTPUT_MAP_SCALE (0.39)  // 转向输出换算成舵机角的缩放系数
 
 // Track_Slope_x1000 是弯道趋势而非严格几何曲率，速度标定表见 run_calc_curve_speed_limit。
 #define RUN_STRAIGHT_SLOPE_THRESHOLD (350) // 低风险直道许可阈值
@@ -161,9 +161,9 @@ static void run_init_fuzzy_direction(void)
     static const double delta_points[FUZZY_PID_LEVEL_COUNT] =
         {-16.0, -9.0, -4.0, 0.0, 4.0, 9.0, 16.0};
     static const double kp_offsets[FUZZY_PID_LEVEL_COUNT] =
-        {-0.35, -0.25, -0.13, 0.0, 0.13, 0.25, 0.35};
+        {-0.35, -0.29, -0.13, 0.0, 0.13, 0.29, 0.35};
     static const double kd_offsets[FUZZY_PID_LEVEL_COUNT] =
-        {-0.15, -0.08, -0.03, 0.0, 0.03, 0.08, 0.15};
+        {-0.15, -0.12, -0.05, 0.0, 0.05, 0.12, 0.15};
     static const unsigned char kp_rules[7][7] = {
         {6, 5, 5, 5, 4, 4, 3},   // NB 行右侧 +1
         {5, 5, 4, 4, 3, 3, 2},
@@ -285,8 +285,8 @@ void run_init(void)
     hardware_init();
     memset(&run_imu_monitor, 0, sizeof(run_imu_monitor));
     run_imu_age_ms = 65535U;
-    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 45.3, 0.093, 0.0, 6000, -1000, 0, 0);
-    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 45.3, 0.093, 0.0, 6000, -1000, 0, 0);
+    PID_Controller_Init(&pid_left, PID_ALGORITHM_INC, 45.3, 0.093, 0.0, 7500, -6000, 0, 0);
+    PID_Controller_Init(&pid_right, PID_ALGORITHM_INC, 45.3, 0.093, 0.0, 7500, -6000, 0, 0);
     steer_base_gains.kp = 0.82;
     steer_base_gains.ki = 0.0;
     steer_base_gains.kd = 0.28;
@@ -730,7 +730,7 @@ static int16 run_calc_curve_speed_limit(const run_vision_struct *vision, int16 u
     // 普通赛道的斜率与速度标定表。
     // 风险上升立即响应，下降沿用新帧缓释；不是额外的远端曲率预测。
     static const int16 slope_points[] = {0, 120, 300, 400, 500, 800, 1100};
-    static const int16 speed_points[] = {340, 330, 310, 285, 235, 220, 210};
+    static const int16 speed_points[] = {340, 325, 305, 285, 235, 220, 210};
     int16 limit = speed_points[sizeof(speed_points) / sizeof(speed_points[0]) - 1U];
     int16 slope = run_curve_risk;
     uint8 point;
